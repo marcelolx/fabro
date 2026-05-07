@@ -7,7 +7,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use console::Style;
+use console::{Style, strip_ansi_codes};
 use fabro_static::EnvVars;
 use fabro_util::run_log::BufferedFileAppender;
 use tracing::field::{Field, Visit};
@@ -197,9 +197,7 @@ where
     N: for<'a> FormatFields<'a> + 'static,
 {
     let mut run_id = None;
-    let Some(scope) = ctx.event_scope() else {
-        return None;
-    };
+    let scope = ctx.event_scope()?;
 
     for span in scope.from_root() {
         if span.metadata().name() != "run" {
@@ -208,7 +206,8 @@ where
 
         let extensions = span.extensions();
         if let Some(fields) = extensions.get::<FormattedFields<N>>() {
-            if let Some(id) = formatted_field_value(&fields.fields, "id") {
+            let fields = strip_ansi_codes(&fields.fields);
+            if let Some(id) = formatted_field_value(&fields, "id") {
                 run_id = Some(id);
             }
         }
@@ -507,6 +506,21 @@ mod tests {
     }
 
     #[test]
+    fn tty_format_with_color_includes_run_id_from_run_span() {
+        let output = render_tty_event(true, || {
+            let span = tracing::info_span!("run", id = %"01HV6D7S5YF4Z4B2M7K4N0Q6T9");
+            let _guard = span.enter();
+            tracing::info!("Snapshot ready");
+        });
+
+        assert!(output.contains("Snapshot ready"));
+        assert!(
+            output.contains("run_id=01HV6D7S5YF4Z4B2M7K4N0Q6T9"),
+            "expected run_id from colored run span fields, got: {output:?}"
+        );
+    }
+
+    #[test]
     fn tty_format_does_not_duplicate_event_run_id() {
         let output = render_tty_event(false, || {
             let span = tracing::info_span!("run", id = %"01HV6D7S5YF4Z4B2M7K4N0Q6T9");
@@ -559,6 +573,7 @@ mod tests {
         let subscriber = registry().with(
             tracing_fmt::layer()
                 .with_writer(output.clone())
+                .with_ansi(ansi)
                 .event_format(TtyLogFormat::new(ansi)),
         );
 
