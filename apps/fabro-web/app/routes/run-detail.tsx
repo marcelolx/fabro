@@ -17,6 +17,7 @@ import { Link, Outlet, useLocation, useMatches } from "react-router";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
 import { InterviewDock } from "../components/interview-dock";
+import { SteerBar } from "../components/steer-bar";
 import { SteerComposer } from "../components/steer-composer";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
@@ -212,8 +213,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
   const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
-  const rootStyle = fullHeight && hasPendingQuestions
-    ? ({ "--fabro-interview-dock-clearance": "18rem" } as CSSProperties)
+  const dockClearance = hasPendingQuestions ? "18rem" : "5rem";
+  const rootStyle = fullHeight
+    ? ({ "--fabro-interview-dock-clearance": dockClearance } as CSSProperties)
     : undefined;
 
   return (
@@ -345,6 +347,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         open={steerOpen}
         onClose={() => setSteerOpen(false)}
       />
+
+      {!hasPendingQuestions && <SteerBar runId={params.id} />}
 
       {hasPendingQuestions && (
         fullHeight ? (
