@@ -72,47 +72,37 @@ export function InterviewDock({ runId, questions }: InterviewDockProps) {
   const submitting = submitMutation.isMutating;
 
   return (
-    <div
-      role="region"
-      aria-label="Interview question"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
-    >
-      <div className="bg-linear-to-t from-page via-page/80 to-transparent pt-10">
-        <div className="pointer-events-auto mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <div className="overflow-hidden rounded-t-2xl bg-panel shadow-[0_-12px_40px_-8px_rgba(0,0,0,0.5)] ring-1 ring-line-strong">
-            <DockHeader
-              stage={question.stage}
-              moreCount={moreCount}
-              onCycle={() =>
-                setActiveIndex((index) => (index + 1) % questions.length)
-              }
-            />
-            <div className="space-y-5 p-5 sm:p-6">
-              <div>
-                <p className="text-pretty text-base/6 font-medium text-fg">
-                  {question.text}
-                </p>
-                <p className="mt-1 text-xs/5 text-fg-muted">
-                  {questionTypeLabel(question.question_type)}
-                </p>
-              </div>
-
-              {question.context_display && (
-                <ContextPanel text={question.context_display} />
-              )}
-
-              <QuestionBody
-                question={question}
-                submitting={submitting}
-                onSubmit={submit}
-              />
-
-              {error && <ErrorMessage message={error} />}
-            </div>
-          </div>
+    <section role="region" aria-label="Interview question">
+      <DockHeader
+        stage={question.stage}
+        moreCount={moreCount}
+        onCycle={() =>
+          setActiveIndex((index) => (index + 1) % questions.length)
+        }
+      />
+      <div className="space-y-5 px-5 py-4 sm:px-6">
+        <div>
+          <p className="text-pretty text-base/6 font-medium text-fg">
+            {question.text}
+          </p>
+          <p className="mt-1 text-xs/5 text-fg-muted">
+            {questionTypeLabel(question.question_type)}
+          </p>
         </div>
+
+        {question.context_display && (
+          <ContextPanel text={question.context_display} />
+        )}
+
+        <QuestionBody
+          question={question}
+          submitting={submitting}
+          onSubmit={submit}
+        />
+
+        {error && <ErrorMessage message={error} />}
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -348,18 +348,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         onClose={() => setSteerOpen(false)}
       />
 
-      {!hasPendingQuestions && <SteerBar runId={params.id} />}
-
-      {hasPendingQuestions && (
-        fullHeight ? (
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-page">
+        {hasPendingQuestions ? (
           <InterviewDock runId={params.id} questions={pendingQuestions} />
         ) : (
-          <>
-            <div aria-hidden="true" className="h-72" />
-            <InterviewDock runId={params.id} questions={pendingQuestions} />
-          </>
-        )
-      )}
+          <SteerBar runId={params.id} />
+        )}
+      </div>
     </div>
   );
 }
