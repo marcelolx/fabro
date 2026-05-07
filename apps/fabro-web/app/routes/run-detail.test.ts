@@ -369,7 +369,12 @@ describe("RunDetail full-height child routes", () => {
     expect(fullHeightRoot).toHaveLength(0);
 
     const outletWrappers = renderer.root.findAll(
-      (node) => node.type === "div" && node.props.className === "mt-6",
+      (node) =>
+        node.type === "div" &&
+        hasClasses(node.props.className, [
+          "mt-6",
+          "pb-[var(--fabro-interview-dock-clearance)]",
+        ]),
     );
     expect(outletWrappers).toHaveLength(1);
   });

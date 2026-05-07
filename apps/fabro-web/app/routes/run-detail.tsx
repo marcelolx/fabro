@@ -21,7 +21,7 @@ import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
 import { SteerComposer } from "../components/steer-composer";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
-import { SECONDARY_BUTTON_CLASS } from "../components/ui";
+import { SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
 import {
   isRunStatus,
   mapRunSummaryToRunItem,
@@ -38,7 +38,7 @@ import {
   type LifecycleMutationResult,
   type PreviewMutationResult,
 } from "../lib/mutations";
-import { formatRelativeTime } from "../lib/format";
+import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
 import { useRunEvents } from "../lib/run-events";
 import { useRunToasts } from "../hooks/use-run-toasts";
 import { useRun, useRunQuestions } from "../lib/queries";
@@ -217,9 +217,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const unarchivePending = unarchiveMutation.isMutating;
   const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
   const dockClearance = hasPendingQuestions ? "18rem" : "5rem";
-  const rootStyle = fullHeight
-    ? ({ "--fabro-interview-dock-clearance": dockClearance } as CSSProperties)
-    : undefined;
+  const rootStyle = {
+    "--fabro-interview-dock-clearance": dockClearance,
+  } as CSSProperties;
 
   return (
     <div
@@ -273,13 +273,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
               </span>
             )}
             {run.lastEventAt && (
-              <span
-                className="flex items-center gap-1.5 font-mono text-xs text-fg-muted"
-                title={`Last event ${new Date(run.lastEventAt).toLocaleString()}`}
-              >
-                <SignalIcon className="size-3.5" aria-hidden="true" />
-                {formatRelativeTime(run.lastEventAt, now)}
-              </span>
+              <Tooltip label={`Last event ${formatAbsoluteTs(run.lastEventAt)}`}>
+                <span className="flex items-center gap-1.5 font-mono text-xs text-fg-muted">
+                  <SignalIcon className="size-3.5" aria-hidden="true" />
+                  {formatRelativeTime(run.lastEventAt, now)}
+                </span>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -348,7 +347,13 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         </nav>
       </div>
 
-      <div className={fullHeight ? "mt-6 flex min-h-0 flex-1 flex-col" : "mt-6"}>
+      <div
+        className={
+          fullHeight
+            ? "mt-6 flex min-h-0 flex-1 flex-col"
+            : "mt-6 pb-[var(--fabro-interview-dock-clearance)]"
+        }
+      >
         <Outlet />
       </div>
 

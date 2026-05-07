@@ -2,7 +2,8 @@
 // exposes the primary button, secondary button, input, error message, and
 // copy button so the auth and in-app surfaces can match.
 
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ClipboardDocumentCheckIcon,
   ClipboardIcon,
@@ -60,5 +61,51 @@ export function CopyButton({
         <ClipboardIcon className="size-4" />
       )}
     </button>
+  );
+}
+
+export function Tooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const id = useId();
+  const rect = open ? triggerRef.current?.getBoundingClientRect() : null;
+  const portalTarget = typeof document === "undefined" ? null : document.body;
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        aria-describedby={open ? id : undefined}
+        className="inline-flex"
+      >
+        {children}
+      </span>
+      {rect && portalTarget
+        ? createPortal(
+            <span
+              role="tooltip"
+              id={id}
+              style={{
+                top: rect.top - 6,
+                left: rect.left + rect.width / 2,
+              }}
+              className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-panel px-2 py-1 text-xs text-fg-2 shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+            >
+              {label}
+            </span>,
+            portalTarget,
+          )
+        : null}
+    </>
   );
 }
