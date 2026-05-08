@@ -18,7 +18,6 @@ import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
 import { InterviewDock } from "../components/interview-dock";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
-import { SteerComposer } from "../components/steer-composer";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
@@ -157,7 +156,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
     .filter((t) => !t.demoOnly || demoMode);
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
   const steerBarRef = useRef<SteerBarHandle | null>(null);
-  const [steerOpen, setSteerOpen] = useState(false);
   const now = useTickingNow(30_000);
   const fullHeight = matches.some(
     (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
@@ -289,8 +287,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         {demoMode && <ConnectMenu />}
 
         <ActionsMenu
-          canSteer={statusKind === "running"}
-          onSteer={() => setSteerOpen(true)}
           canSendInterrupt={statusKind === "running"}
           interruptPending={interruptMutation.isMutating}
           onSendInterrupt={() => void interruptMutation.trigger()}
@@ -359,12 +355,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       >
         <Outlet />
       </div>
-
-      <SteerComposer
-        runId={params.id}
-        open={steerOpen}
-        onClose={() => setSteerOpen(false)}
-      />
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-page">
         {hasPendingQuestions ? (
@@ -452,8 +442,6 @@ function ConnectMenu() {
 }
 
 interface ActionsMenuProps {
-  canSteer: boolean;
-  onSteer: () => void;
   canSendInterrupt: boolean;
   interruptPending: boolean;
   onSendInterrupt: () => void;
@@ -475,7 +463,6 @@ interface ActionsMenuProps {
 
 function ActionsMenu(props: ActionsMenuProps) {
   const {
-    canSteer, onSteer,
     canSendInterrupt, interruptPending, onSendInterrupt,
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
@@ -485,7 +472,7 @@ function ActionsMenu(props: ActionsMenuProps) {
   } = props;
 
   const hasOps =
-    canPreview || canSteer || canSendInterrupt || canFocusSteer;
+    canPreview || canSendInterrupt || canFocusSteer;
   const hasLifecycle = canArchive || canUnarchive;
   const hasDestructive = canCancel;
   const hasAny = hasOps || hasLifecycle || hasDestructive;
@@ -515,13 +502,6 @@ function ActionsMenu(props: ActionsMenuProps) {
               className={MENU_ITEM_CLASS}
             >
               {previewPending ? "Opening…" : "Preview"}
-            </button>
-          </MenuItem>
-        )}
-        {canSteer && (
-          <MenuItem>
-            <button type="button" onClick={onSteer} className={MENU_ITEM_CLASS}>
-              Steer
             </button>
           </MenuItem>
         )}
