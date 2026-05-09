@@ -108,10 +108,12 @@ core-foundation = { version = "0.9", optional = true }
 openssl = { version = "0.10", features = ["vendored"] }
 
 [build-dependencies]
+fabro-build-support = { path = "../build-support" }
 chrono = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2"
+fabro-build-support = { path = "../build-support" }
 fabro-server = { path = "../fabro-server", features = ["test-support"] }
 insta = { workspace = true, features = ["filters"] }
 paste = "1"

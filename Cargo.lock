@@ -1619,6 +1619,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-build-support"
+version = "0.228.0-nightly.0"
+
+[[package]]
 name = "fabro-checkpoint"
 version = "0.228.0-nightly.0"
 dependencies = [
@@ -1657,6 +1661,7 @@ dependencies = [
  "fabro-agent",
  "fabro-api",
  "fabro-auth",
+ "fabro-build-support",
  "fabro-checkpoint",
  "fabro-client",
  "fabro-config",
@@ -2134,6 +2139,7 @@ dependencies = [
  "fabro-agent",
  "fabro-api",
  "fabro-auth",
+ "fabro-build-support",
  "fabro-config",
  "fabro-github",
  "fabro-graphviz",

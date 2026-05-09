@@ -94,6 +94,7 @@ zeroize.workspace = true
 strum.workspace = true
 
 [build-dependencies]
+fabro-build-support = { path = "../build-support" }
 chrono = { workspace = true }
 
 [dev-dependencies]
