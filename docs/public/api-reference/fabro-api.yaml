@@ -2574,8 +2574,8 @@ paths:
     post:
       operationId: createRunSshAccess
       tags: [Human-in-the-Loop]
-      summary: SSH Access
-      description: Creates a time-limited SSH command for the run's sandbox environment.
+      summary: Sandbox Access Command
+      description: Creates a command for connecting to the run's sandbox environment. Daytona runs return a time-limited SSH command; Docker runs return a local docker exec command.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -2586,7 +2586,7 @@ paths:
               $ref: "#/components/schemas/SshAccessRequest"
       responses:
         "201":
-          description: SSH command created
+          description: Sandbox access command created
           content:
             application/json:
               schema:
@@ -2601,7 +2601,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Run has no active sandbox or provider does not support SSH
+          description: Run has no active sandbox or provider does not support access commands
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -7651,28 +7651,28 @@ components:
           example: "preview-token-123"
 
     SshAccessRequest:
-      description: Request body for creating SSH access for a sandbox-backed run.
+      description: Request body for creating sandbox access for a sandbox-backed run.
       type: object
       required:
         - ttl_minutes
       properties:
         ttl_minutes:
           type: number
-          description: Time-to-live for the SSH command in minutes.
+          description: Time-to-live for time-limited access commands in minutes. Ignored by providers whose commands are not time-limited.
           minimum: 1
           maximum: 1440
           example: 60
 
     SshAccessResponse:
-      description: Response containing an SSH command for the sandbox.
+      description: Response containing a command for connecting to the sandbox.
       type: object
       required:
         - command
       properties:
         command:
           type: string
-          description: SSH command to connect to the sandbox.
-          example: ssh daytona@preview.example.com -p 2222
+          description: Command to connect to the sandbox.
+          example: docker exec -it fabro-run-01HY0000000000000000000000 sh -lc 'cd /workspace && exec sh -l'
 
     SandboxFileEntry:
       description: A directory entry in a run sandbox.

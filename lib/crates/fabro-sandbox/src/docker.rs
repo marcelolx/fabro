@@ -46,6 +46,15 @@ const MANAGED_LABEL: &str = "sh.fabro.managed";
 const RUN_ID_LABEL: &str = "sh.fabro.run_id";
 static EXEC_CONTROL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+pub fn docker_access_command(container_id: &str) -> String {
+    let shell = format!("cd {} && exec sh -l", shell_quote(WORKING_DIRECTORY));
+    format!(
+        "docker exec -it {} sh -lc {}",
+        shell_quote(container_id),
+        shell_quote(&shell)
+    )
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DockerSandboxOptions {
     /// Docker image to use.
@@ -1542,6 +1551,10 @@ impl Sandbox for DockerSandbox {
         WORKING_DIRECTORY
     }
 
+    async fn ssh_access_command(&self) -> crate::Result<Option<String>> {
+        Ok(Some(docker_access_command(self.container_id()?)))
+    }
+
     fn platform(&self) -> &str {
         self.cached_platform.get().map_or("linux", String::as_str)
     }
@@ -1712,6 +1725,22 @@ mod tests {
         assert_eq!(
             labels.get(RUN_ID_LABEL).map(String::as_str),
             Some("01HY0000000000000000000000")
+        );
+    }
+
+    #[test]
+    fn docker_access_command_uses_exec_in_workspace() {
+        assert_eq!(
+            docker_access_command("fabro-run-01HY0000000000000000000000"),
+            "docker exec -it fabro-run-01HY0000000000000000000000 sh -lc 'cd /workspace && exec sh -l'"
+        );
+    }
+
+    #[test]
+    fn docker_access_command_quotes_container_identifier() {
+        assert_eq!(
+            docker_access_command("container with spaces"),
+            "docker exec -it 'container with spaces' sh -lc 'cd /workspace && exec sh -l'"
         );
     }
 

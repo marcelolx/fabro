@@ -297,13 +297,50 @@ async fn create_ssh_access(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
-        Ok(sandbox) => sandbox,
+    let record = match load_run_sandbox_record(&state, &id).await {
+        Ok(record) => record,
         Err(response) => return response,
     };
-    match sandbox.create_ssh_access(Some(request.ttl_minutes)).await {
-        Ok(command) => (StatusCode::CREATED, Json(SshAccessResponse { command })).into_response(),
-        Err(err) => ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response(),
+
+    match record.provider.as_str() {
+        provider if provider == SandboxProvider::Daytona.to_string() => {
+            let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+                Ok(sandbox) => sandbox,
+                Err(response) => return response,
+            };
+            match sandbox.create_ssh_access(Some(request.ttl_minutes)).await {
+                Ok(command) => {
+                    (StatusCode::CREATED, Json(SshAccessResponse { command })).into_response()
+                }
+                Err(err) => {
+                    ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+                }
+            }
+        }
+        provider if provider == SandboxProvider::Docker.to_string() => {
+            let sandbox = match reconnect_run_sandbox(&state, &id).await {
+                Ok(sandbox) => sandbox,
+                Err(response) => return response,
+            };
+            match sandbox.ssh_access_command().await {
+                Ok(Some(command)) => {
+                    (StatusCode::CREATED, Json(SshAccessResponse { command })).into_response()
+                }
+                Ok(None) => ApiError::new(
+                    StatusCode::CONFLICT,
+                    "Sandbox provider does not support access commands.",
+                )
+                .into_response(),
+                Err(err) => {
+                    ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+                }
+            }
+        }
+        _ => ApiError::new(
+            StatusCode::CONFLICT,
+            "Sandbox provider does not support access commands.",
+        )
+        .into_response(),
     }
 }
 

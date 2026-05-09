@@ -33,6 +33,13 @@ interface TerminalServerMessage {
 
 const TERMINAL_BACKGROUND = "#05080F";
 
+// Pin the cell to a whole-pixel height so xterm's fit math stays exact.
+// fontSize × lineHeight = 13 × (19/13) = 19px → no sub-pixel rounding,
+// no bottom-row clipping.
+const TERMINAL_FONT_SIZE = 13;
+const TERMINAL_CELL_HEIGHT_PX = 19;
+const TERMINAL_LINE_HEIGHT = TERMINAL_CELL_HEIGHT_PX / TERMINAL_FONT_SIZE;
+
 const TERMINAL_THEME = {
   background:          TERMINAL_BACKGROUND,
   foreground:          "#E6EDF3",
@@ -80,6 +87,22 @@ export function parseTerminalServerMessage(data: string): TerminalServerMessage 
   }
 }
 
+export function terminalAccessCommandLabel(provider: string | null): string | null {
+  if (provider === "daytona") return "SSH";
+  if (provider === "docker") return "Exec";
+  return null;
+}
+
+function terminalAccessCommandCopiedMessage(provider: string | null): string {
+  return provider === "docker" ? "Docker exec command copied." : "SSH command copied.";
+}
+
+function terminalAccessCommandErrorMessage(provider: string | null): string {
+  return provider === "docker"
+    ? "Could not copy Docker exec command."
+    : "Could not copy SSH command.";
+}
+
 function getObject(value: unknown, key: string): Record<string, unknown> | null {
   if (!value || typeof value !== "object") return null;
   const child = (value as Record<string, unknown>)[key];
@@ -89,15 +112,6 @@ function getObject(value: unknown, key: string): Record<string, unknown> | null 
 function getString(value: Record<string, unknown> | null, key: string): string | null {
   const child = value?.[key];
   return typeof child === "string" ? child : null;
-}
-
-function safeFit(fitAddon: XtermFitAddon, terminal: XtermTerminal) {
-  const proposed = fitAddon.proposeDimensions();
-  if (!proposed || proposed.cols <= 0 || proposed.rows <= 0) return;
-  // Reserve one row of buffer to defeat sub-pixel cell-height rounding,
-  // which otherwise clips the bottom row when the available height is not
-  // an exact multiple of the cell height.
-  terminal.resize(proposed.cols, Math.max(proposed.rows - 1, 1));
 }
 
 function sendResize(socket: WebSocket | null, terminal: XtermTerminal | null) {
@@ -169,7 +183,7 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
   const sandbox = getObject(getObject(stateQuery.data, "run"), "sandbox")
     ?? getObject(stateQuery.data, "sandbox");
   const provider = getString(sandbox, "provider");
-  const canCopySsh = provider === "daytona";
+  const accessCommandLabel = terminalAccessCommandLabel(provider);
   const [connectionKey, setConnectionKey] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -186,21 +200,23 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
     setConnectionKey((key) => key + 1);
   }, []);
 
-  const copySshCommand = useCallback(async () => {
-    if (!canCopySsh) return;
+  const copyAccessCommand = useCallback(async () => {
+    if (!accessCommandLabel) return;
     try {
       const response = await apiData(() =>
         humanInTheLoopApi.createRunSshAccess(params.id, { ttl_minutes: 60 }),
       );
       await navigator.clipboard.writeText(response.command);
-      push({ message: "SSH command copied." });
+      push({ message: terminalAccessCommandCopiedMessage(provider) });
     } catch (err) {
       push({
         tone: "error",
-        message: err instanceof Error ? err.message : "Could not copy SSH command.",
+        message: err instanceof Error
+          ? err.message
+          : terminalAccessCommandErrorMessage(provider),
       });
     }
-  }, [canCopySsh, params.id, push]);
+  }, [accessCommandLabel, params.id, provider, push]);
 
   useEffect(() => {
     if (!terminalEl.current) return undefined;
@@ -224,15 +240,15 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
         cursorBlink: true,
         convertEol: true,
         fontFamily: "\"JetBrains Mono\", ui-monospace, monospace",
-        fontSize: 13,
-        lineHeight: 1.45,
+        fontSize: TERMINAL_FONT_SIZE,
+        lineHeight: TERMINAL_LINE_HEIGHT,
         scrollback: 5000,
         theme: TERMINAL_THEME,
       });
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(terminalEl.current);
-      safeFit(fitAddon, terminal);
+      fitAddon.fit();
       terminal.focus();
       terminalRef.current = terminal;
       fitRef.current = fitAddon;
@@ -280,7 +296,7 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
       });
 
       resizeObserver = new ResizeObserver(() => {
-        safeFit(fitAddon, terminal);
+        fitAddon.fit();
         sendResize(socket, terminal);
       });
       resizeObserver.observe(terminalEl.current);
@@ -288,7 +304,7 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
       if (typeof document !== "undefined" && document.fonts?.ready) {
         void document.fonts.ready.then(() => {
           if (disposed) return;
-          safeFit(fitAddon, terminal);
+          fitAddon.fit();
           sendResize(socket, terminal);
         });
       }
@@ -328,15 +344,15 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
               <ArrowPathIcon className="size-4" aria-hidden="true" />
             </button>
           </Tooltip>
-          {canCopySsh && (
+          {accessCommandLabel && (
             <button
               type="button"
               className={SECONDARY_BUTTON_CLASS}
-              onClick={() => void copySshCommand()}
-              aria-label="Copy SSH command"
+              onClick={() => void copyAccessCommand()}
+              aria-label={`Copy ${accessCommandLabel} command`}
             >
               <ClipboardDocumentIcon className="size-4" aria-hidden="true" />
-              SSH
+              {accessCommandLabel}
             </button>
           )}
         </div>

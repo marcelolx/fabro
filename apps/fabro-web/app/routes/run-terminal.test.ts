@@ -4,6 +4,7 @@ import {
   buildTerminalWebSocketUrl,
   parseTerminalServerMessage,
   TERMINAL_DOCK_CLEARANCE_CLASS,
+  terminalAccessCommandLabel,
 } from "./run-terminal";
 
 function locationLike(url: string): Location {
@@ -35,5 +36,12 @@ describe("run terminal route helpers", () => {
 
   test("reserves space above the run steering bar", () => {
     expect(TERMINAL_DOCK_CLEARANCE_CLASS).toContain("--fabro-interview-dock-clearance");
+  });
+
+  test("labels sandbox access commands by provider", () => {
+    expect(terminalAccessCommandLabel("daytona")).toBe("SSH");
+    expect(terminalAccessCommandLabel("docker")).toBe("Exec");
+    expect(terminalAccessCommandLabel("local")).toBeNull();
+    expect(terminalAccessCommandLabel(null)).toBeNull();
   });
 });
