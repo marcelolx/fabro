@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildTerminalWebSocketUrl,
   parseTerminalServerMessage,
+  sandboxStatusDetail,
   TERMINAL_DOCK_CLEARANCE_CLASS,
   terminalAccessCommandLabel,
 } from "./run-terminal";
@@ -43,5 +44,14 @@ describe("run terminal route helpers", () => {
     expect(terminalAccessCommandLabel("docker")).toBe("Exec");
     expect(terminalAccessCommandLabel("local")).toBeNull();
     expect(terminalAccessCommandLabel(null)).toBeNull();
+  });
+
+  test("uses sandbox identifier as terminal status detail", () => {
+    expect(sandboxStatusDetail({ provider: "docker", identifier: "container-abc123" }))
+      .toBe("container-abc123");
+    expect(sandboxStatusDetail({ provider: "daytona", id: "sandbox-name" }))
+      .toBe("sandbox-name");
+    expect(sandboxStatusDetail({ provider: "docker" })).toBe("docker");
+    expect(sandboxStatusDetail(null)).toBeNull();
   });
 });

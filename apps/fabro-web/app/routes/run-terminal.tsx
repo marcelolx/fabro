@@ -114,6 +114,12 @@ function getString(value: Record<string, unknown> | null, key: string): string |
   return typeof child === "string" ? child : null;
 }
 
+export function sandboxStatusDetail(sandbox: Record<string, unknown> | null): string | null {
+  return getString(sandbox, "identifier")
+    ?? getString(sandbox, "id")
+    ?? getString(sandbox, "provider");
+}
+
 function sendResize(socket: WebSocket | null, terminal: XtermTerminal | null) {
   if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) return;
   socket.send(JSON.stringify({
@@ -151,10 +157,10 @@ function statusLabel(status: ConnectionStatus): string {
 
 function StatusPill({
   status,
-  provider,
+  detail,
 }: {
   status: ConnectionStatus;
-  provider: string | null;
+  detail: string | null;
 }) {
   return (
     <span
@@ -167,10 +173,12 @@ function StatusPill({
         aria-hidden="true"
       />
       <span>{statusLabel(status)}</span>
-      {provider ? (
+      {detail ? (
         <>
           <span className="text-fg-muted" aria-hidden="true">·</span>
-          <span className="text-fg-3">{provider}</span>
+          <span className="max-w-72 truncate font-mono text-fg-3" title={detail}>
+            {detail}
+          </span>
         </>
       ) : null}
     </span>
@@ -183,6 +191,7 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
   const sandbox = getObject(getObject(stateQuery.data, "run"), "sandbox")
     ?? getObject(stateQuery.data, "sandbox");
   const provider = getString(sandbox, "provider");
+  const sandboxDetail = sandboxStatusDetail(sandbox);
   const accessCommandLabel = terminalAccessCommandLabel(provider);
   const [connectionKey, setConnectionKey] = useState(0);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -332,7 +341,7 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
     >
       <h2 id={terminalId} className="sr-only">Terminal</h2>
       <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <StatusPill status={status} provider={provider} />
+        <StatusPill status={status} detail={sandboxDetail} />
         <div className="flex items-center gap-2">
           <Tooltip label="Reconnect">
             <button
