@@ -304,7 +304,6 @@ mod title_tests {
                 definition_blob: None,
                 git: None,
                 fork_source_ref: None,
-                in_place: false,
             }),
             ..RunProjection::default()
         }

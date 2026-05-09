@@ -137,12 +137,12 @@ fn resolved_server_integrations_are_slack_only_for_chat() {
 
 #[test]
 fn parsing_rejects_unknown_server_integrations() {
-    let source = r#"
+    let source = r"
 _version = 1
 
 [server.integrations.chatapp]
 enabled = true
-"#;
+";
 
     let err = source
         .parse::<SettingsLayer>()
