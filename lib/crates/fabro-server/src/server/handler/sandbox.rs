@@ -6,10 +6,10 @@ use fabro_sandbox::{TerminalSize, open_terminal_for_run};
 use super::super::{
     ApiError, AppState, Bytes, DaytonaSandbox, EnvVars, HeaderMap, IntoResponse, Json,
     NamedTempFile, Path, PreviewUrlRequest, PreviewUrlResponse, Query, RequiredUser, Response,
-    Router, RunId, Sandbox, SandboxFileEntry, SandboxFileListResponse, SandboxProvider,
-    SshAccessRequest, SshAccessResponse, State, StatusCode, collect_causes, fs, get,
-    octet_stream_response, parse_run_id_path, post, reconnect_for_run, reject_if_archived,
-    render_with_causes,
+    Router, RunId, Sandbox, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
+    SandboxProvider, SshAccessRequest, SshAccessResponse, State, StatusCode, collect_causes, fs,
+    get, octet_stream_response, parse_run_id_path, post, reconnect_for_run, reject_if_archived,
+    render_with_causes, sandbox_details,
 };
 
 const MAX_TERMINAL_CONTROL_BYTES: usize = 4096;
@@ -19,11 +19,41 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/preview", post(generate_preview_url))
         .route("/runs/{id}/ssh", post(create_ssh_access))
         .route("/runs/{id}/terminal", get(run_terminal))
+        .route("/runs/{id}/sandbox", get(retrieve_run_sandbox))
         .route("/runs/{id}/sandbox/files", get(list_sandbox_files))
         .route(
             "/runs/{id}/sandbox/file",
             get(get_sandbox_file).put(put_sandbox_file),
         )
+}
+
+async fn retrieve_run_sandbox(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let record = match load_run_sandbox_record_or_not_found(&state, &id).await {
+        Ok(record) => record,
+        Err(response) => return response,
+    };
+    let daytona_api_key = state.vault_or_env(EnvVars::DAYTONA_API_KEY);
+    let daytona_organization_id = state.vault_or_env(EnvVars::DAYTONA_ORGANIZATION_ID);
+    match sandbox_details(&record, daytona_api_key, daytona_organization_id, Some(id)).await {
+        Ok(details) => Json::<SandboxDetails>(details).into_response(),
+        Err(err) => {
+            let detail = format!("{err:#}");
+            let status = if detail.contains("has no details implementation") {
+                StatusCode::NOT_IMPLEMENTED
+            } else {
+                StatusCode::CONFLICT
+            };
+            ApiError::new(status, detail).into_response()
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -526,6 +556,26 @@ async fn load_run_sandbox_record(
     }
 }
 
+/// Same as `load_run_sandbox_record`, but treats a missing sandbox record as
+/// `404 Not Found` instead of `409 Conflict`. Used by the inspection endpoint
+/// where there is no resource to act on if the run never had a sandbox.
+async fn load_run_sandbox_record_or_not_found(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+) -> Result<fabro_types::SandboxRecord, Response> {
+    match state.store.open_run_reader(run_id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => run_state
+                .sandbox
+                .ok_or_else(|| ApiError::not_found("Run has no sandbox.").into_response()),
+            Err(err) => Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            ),
+        },
+        Err(_) => Err(ApiError::not_found("Run not found.").into_response()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue};
@@ -572,5 +622,146 @@ mod tests {
         headers.insert("host", HeaderValue::from_static("127.0.0.1:4187"));
         headers.insert("origin", HeaderValue::from_static("https://evil.example"));
         assert!(!origin_allowed(&headers));
+    }
+}
+
+#[cfg(test)]
+mod retrieve_sandbox_tests {
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
+    use fabro_types::RunId;
+    use serde_json::{Value, json};
+    use tower::ServiceExt;
+
+    use crate::test_support::{build_test_router, test_app_state};
+
+    fn req_get(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("sandbox details GET request should build")
+    }
+
+    async fn body_json(response: axum::response::Response) -> Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should fit in memory");
+        serde_json::from_slice(&bytes).expect("response body should be valid JSON")
+    }
+
+    #[tokio::test]
+    async fn missing_run_returns_404() {
+        let app = build_test_router(test_app_state());
+        let absent = RunId::new();
+        let response = app
+            .oneshot(req_get(&format!("/api/v1/runs/{absent}/sandbox")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_json(response).await;
+        assert!(
+            body["errors"][0]["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Run not found"),
+            "unexpected body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_without_sandbox_record_returns_404() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        let response = app
+            .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_json(response).await;
+        assert!(
+            body["errors"][0]["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Run has no sandbox"),
+            "unexpected body: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_sandbox_returns_provider_neutral_details() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        let payload = fabro_store::EventPayload::new(
+            json!({
+                "id": "evt-sandbox-init",
+                "ts": "2026-05-09T12:00:00Z",
+                "run_id": run_id,
+                "event": "sandbox.initialized",
+                "properties": {
+                    "provider": "local",
+                    "working_directory": "/workspace",
+                },
+            }),
+            &run_id,
+        )
+        .expect("sandbox.initialized payload should validate");
+        run_store.append_event(&payload).await.unwrap();
+
+        let response = app
+            .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["provider"], "local");
+        assert_eq!(body["state"], "running");
+        assert!(body["resources"].is_object());
+        assert!(body["timestamps"].is_object());
+    }
+
+    #[tokio::test]
+    async fn unknown_provider_returns_501() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        let payload = fabro_store::EventPayload::new(
+            json!({
+                "id": "evt-sandbox-init",
+                "ts": "2026-05-09T12:00:00Z",
+                "run_id": run_id,
+                "event": "sandbox.initialized",
+                "properties": {
+                    "provider": "ephemeral-mystery-cloud",
+                    "working_directory": "/workspace",
+                },
+            }),
+            &run_id,
+        )
+        .expect("sandbox.initialized payload should validate");
+        run_store.append_event(&payload).await.unwrap();
+
+        let response = app
+            .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     }
 }

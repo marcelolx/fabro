@@ -33,9 +33,9 @@ pub use fabro_api::types::{
     PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
     RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RewindRequest, RewindResponse,
     RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
-    RunError, RunManifest, RunStage, RunStatusResponse, SandboxFileEntry, SandboxFileListResponse,
-    SshAccessRequest, SshAccessResponse, StageHandler, StageState, StartRunRequest,
-    SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
+    RunError, RunManifest, RunStage, RunStatusResponse, SandboxDetails, SandboxFileEntry,
+    SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
+    StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
     SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
 };
 use fabro_auth::{
@@ -58,6 +58,7 @@ use fabro_llm::types::{
 use fabro_model::{BilledTokenCounts, Catalog, ModelTestMode, Provider};
 use fabro_redact::redact_jsonl_line;
 use fabro_sandbox::daytona::{self, DaytonaSandbox};
+use fabro_sandbox::details::sandbox_details;
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_sandbox::{Sandbox, SandboxProvider};
 use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
