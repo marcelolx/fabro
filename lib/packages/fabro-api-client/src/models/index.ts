@@ -323,6 +323,7 @@ export * from './tls-mode';
 export * from './update-run-request';
 export * from './user-response';
 export * from './validate-response';
+export * from './vnc-preview-response';
 export * from './webhook-strategy';
 export * from './workflow-detail-response';
 export * from './workflow-diagnostic';

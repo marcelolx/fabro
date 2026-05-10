@@ -346,6 +346,7 @@ models/tls-mode.ts
 models/update-run-request.ts
 models/user-response.ts
 models/validate-response.ts
+models/vnc-preview-response.ts
 models/webhook-strategy.ts
 models/workflow-detail-response.ts
 models/workflow-diagnostic.ts

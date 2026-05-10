@@ -5,6 +5,7 @@ mod install_openai_compatible;
 mod routing;
 mod run_files;
 mod runs;
+mod sandbox_vnc;
 mod settings;
 mod system;
 mod tcp;

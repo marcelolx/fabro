@@ -1,18 +1,59 @@
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use fabro_sandbox::{TerminalSize, open_terminal_for_run};
+use futures_util::FutureExt;
+use futures_util::future::BoxFuture;
 
 use super::super::{
     ApiError, AppState, Bytes, DaytonaSandbox, EnvVars, HeaderMap, IntoResponse, Json,
     NamedTempFile, Path, PreviewUrlRequest, PreviewUrlResponse, Query, RequiredUser, Response,
     Router, RunId, Sandbox, SandboxDetails, SandboxFileEntry, SandboxFileListResponse,
-    SandboxProvider, SshAccessRequest, SshAccessResponse, State, StatusCode, collect_causes, fs,
-    get, octet_stream_response, parse_run_id_path, post, reconnect_for_run, reject_if_archived,
-    render_with_causes, sandbox_details,
+    SandboxProvider, SshAccessRequest, SshAccessResponse, State, StatusCode, VncPreviewResponse,
+    collect_causes, fs, get, octet_stream_response, parse_run_id_path, post, reconnect_for_run,
+    reject_if_archived, render_with_causes, sandbox_details,
 };
 
 const MAX_TERMINAL_CONTROL_BYTES: usize = 4096;
+const DEFAULT_VNC_NO_VNC_PORT: u16 = 6080;
+const DEFAULT_VNC_TTL_SECS: i32 = 3600;
+
+trait VncSandbox {
+    fn start_computer_use(&self) -> BoxFuture<'_, fabro_sandbox::Result<()>>;
+    fn signed_preview_url(
+        &self,
+        port: u16,
+        expires_in_secs: i32,
+    ) -> BoxFuture<'_, fabro_sandbox::Result<String>>;
+}
+
+impl VncSandbox for DaytonaSandbox {
+    fn start_computer_use(&self) -> BoxFuture<'_, fabro_sandbox::Result<()>> {
+        async move {
+            let computer_use = self.computer_use().await?;
+            computer_use
+                .start()
+                .await
+                .map_err(|err| fabro_sandbox::Error::context("Failed to start Computer Use", err))
+                .map(|_| ())
+        }
+        .boxed()
+    }
+
+    fn signed_preview_url(
+        &self,
+        port: u16,
+        expires_in_secs: i32,
+    ) -> BoxFuture<'_, fabro_sandbox::Result<String>> {
+        async move {
+            self.get_signed_preview_url(port, Some(expires_in_secs))
+                .await
+                .map(|preview| preview.url)
+        }
+        .boxed()
+    }
+}
 
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -20,6 +61,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/ssh", post(create_ssh_access))
         .route("/runs/{id}/terminal", get(run_terminal))
         .route("/runs/{id}/sandbox", get(retrieve_run_sandbox))
+        .route("/runs/{id}/sandbox/vnc", post(create_sandbox_vnc_preview))
         .route("/runs/{id}/sandbox/files", get(list_sandbox_files))
         .route(
             "/runs/{id}/sandbox/file",
@@ -374,6 +416,60 @@ async fn create_ssh_access(
     }
 }
 
+async fn create_sandbox_vnc_preview(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let record = match load_run_sandbox_record(&state, &id).await {
+        Ok(record) => record,
+        Err(response) => return response,
+    };
+    if record.provider != SandboxProvider::Daytona.to_string() {
+        return ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "Sandbox provider does not support VNC previews.",
+        )
+        .into_response();
+    }
+    let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    match build_vnc_preview_response(&sandbox).await {
+        Ok(response) => (StatusCode::CREATED, Json(response)).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn build_vnc_preview_response(
+    sandbox: &impl VncSandbox,
+) -> Result<VncPreviewResponse, Response> {
+    sandbox.start_computer_use().await.map_err(|err| {
+        ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+    })?;
+    let url = sandbox
+        .signed_preview_url(DEFAULT_VNC_NO_VNC_PORT, DEFAULT_VNC_TTL_SECS)
+        .await
+        .map_err(|err| {
+            ApiError::new(StatusCode::CONFLICT, err.display_with_causes()).into_response()
+        })?;
+    Ok(VncPreviewResponse {
+        expires_in_secs: NonZeroU64::new(
+            u64::try_from(DEFAULT_VNC_TTL_SECS).expect("default VNC TTL should fit in u64"),
+        )
+        .expect("default VNC TTL should be nonzero"),
+        port: NonZeroU64::new(u64::from(DEFAULT_VNC_NO_VNC_PORT))
+            .expect("default VNC port should be nonzero"),
+        provider: "daytona".to_string(),
+        url,
+    })
+}
+
 async fn list_sandbox_files(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -579,6 +675,7 @@ async fn load_run_sandbox_record_or_not_found(
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, HeaderValue};
+    use futures_util::FutureExt;
 
     use super::*;
 
@@ -623,6 +720,87 @@ mod tests {
         headers.insert("origin", HeaderValue::from_static("https://evil.example"));
         assert!(!origin_allowed(&headers));
     }
+
+    struct FakeVncSandbox {
+        start_error:      Option<&'static str>,
+        signed_url_error: Option<&'static str>,
+        signed_url:       &'static str,
+    }
+
+    impl VncSandbox for FakeVncSandbox {
+        fn start_computer_use(
+            &self,
+        ) -> futures_util::future::BoxFuture<'_, fabro_sandbox::Result<()>> {
+            async move {
+                match self.start_error {
+                    Some(message) => Err(fabro_sandbox::Error::message(message)),
+                    None => Ok(()),
+                }
+            }
+            .boxed()
+        }
+
+        fn signed_preview_url(
+            &self,
+            port: u16,
+            expires_in_secs: i32,
+        ) -> futures_util::future::BoxFuture<'_, fabro_sandbox::Result<String>> {
+            async move {
+                assert_eq!(port, DEFAULT_VNC_NO_VNC_PORT);
+                assert_eq!(expires_in_secs, DEFAULT_VNC_TTL_SECS);
+                match self.signed_url_error {
+                    Some(message) => Err(fabro_sandbox::Error::message(message)),
+                    None => Ok(self.signed_url.to_string()),
+                }
+            }
+            .boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn vnc_preview_response_uses_daytona_defaults() {
+        let sandbox = FakeVncSandbox {
+            start_error:      None,
+            signed_url_error: None,
+            signed_url:       "https://preview.example.test/sandbox/6080",
+        };
+
+        let response = build_vnc_preview_response(&sandbox).await.unwrap();
+
+        assert_eq!(response.url, "https://preview.example.test/sandbox/6080");
+        assert_eq!(response.provider, "daytona");
+        assert_eq!(response.port.get(), u64::from(DEFAULT_VNC_NO_VNC_PORT));
+        assert_eq!(
+            response.expires_in_secs.get(),
+            u64::try_from(DEFAULT_VNC_TTL_SECS).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn vnc_preview_response_maps_computer_use_start_failure_to_conflict() {
+        let sandbox = FakeVncSandbox {
+            start_error:      Some("computer use failed"),
+            signed_url_error: None,
+            signed_url:       "https://preview.example.test/sandbox/6080",
+        };
+
+        let response = build_vnc_preview_response(&sandbox).await.unwrap_err();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn vnc_preview_response_maps_signed_preview_failure_to_conflict() {
+        let sandbox = FakeVncSandbox {
+            start_error:      None,
+            signed_url_error: Some("preview failed"),
+            signed_url:       "https://preview.example.test/sandbox/6080",
+        };
+
+        let response = build_vnc_preview_response(&sandbox).await.unwrap_err();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
 }
 
 #[cfg(test)]
@@ -641,6 +819,14 @@ mod retrieve_sandbox_tests {
             .uri(uri)
             .body(Body::empty())
             .expect("sandbox details GET request should build")
+    }
+
+    fn req_post(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("sandbox POST request should build")
     }
 
     async fn body_json(response: axum::response::Response) -> Value {
@@ -666,6 +852,28 @@ mod retrieve_sandbox_tests {
             run_id,
         )
         .expect("run.created payload should validate");
+        run_store.append_event(&payload).await.unwrap();
+    }
+
+    async fn append_sandbox_initialized(
+        run_store: &fabro_store::RunDatabase,
+        run_id: &RunId,
+        provider: &str,
+    ) {
+        let payload = fabro_store::EventPayload::new(
+            json!({
+                "id": "evt-sandbox-init",
+                "ts": "2026-05-09T12:00:00Z",
+                "run_id": run_id,
+                "event": "sandbox.initialized",
+                "properties": {
+                    "provider": provider,
+                    "working_directory": "/workspace",
+                },
+            }),
+            run_id,
+        )
+        .expect("sandbox.initialized payload should validate");
         run_store.append_event(&payload).await.unwrap();
     }
 
@@ -725,21 +933,7 @@ mod retrieve_sandbox_tests {
             .await
             .expect("test run should be creatable");
         append_run_created(&run_store, &run_id).await;
-        let payload = fabro_store::EventPayload::new(
-            json!({
-                "id": "evt-sandbox-init",
-                "ts": "2026-05-09T12:00:00Z",
-                "run_id": run_id,
-                "event": "sandbox.initialized",
-                "properties": {
-                    "provider": "local",
-                    "working_directory": "/workspace",
-                },
-            }),
-            &run_id,
-        )
-        .expect("sandbox.initialized payload should validate");
-        run_store.append_event(&payload).await.unwrap();
+        append_sandbox_initialized(&run_store, &run_id, "local").await;
 
         let response = app
             .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
@@ -764,26 +958,54 @@ mod retrieve_sandbox_tests {
             .await
             .expect("test run should be creatable");
         append_run_created(&run_store, &run_id).await;
-        let payload = fabro_store::EventPayload::new(
-            json!({
-                "id": "evt-sandbox-init",
-                "ts": "2026-05-09T12:00:00Z",
-                "run_id": run_id,
-                "event": "sandbox.initialized",
-                "properties": {
-                    "provider": "ephemeral-mystery-cloud",
-                    "working_directory": "/workspace",
-                },
-            }),
-            &run_id,
-        )
-        .expect("sandbox.initialized payload should validate");
-        run_store.append_event(&payload).await.unwrap();
+        append_sandbox_initialized(&run_store, &run_id, "ephemeral-mystery-cloud").await;
 
         let response = app
             .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn local_sandbox_vnc_returns_501() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
+        append_sandbox_initialized(&run_store, &run_id, "local").await;
+
+        let response = app
+            .oneshot(req_post(&format!("/api/v1/runs/{run_id}/sandbox/vnc")))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    #[tokio::test]
+    async fn docker_sandbox_vnc_returns_501_without_reconnect() {
+        let state = test_app_state();
+        let app = build_test_router(state.clone());
+        let run_id = RunId::new();
+        let run_store = state
+            .store_ref()
+            .create_run(&run_id)
+            .await
+            .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
+        append_sandbox_initialized(&run_store, &run_id, "docker").await;
+
+        let response = app
+            .oneshot(req_post(&format!("/api/v1/runs/{run_id}/sandbox/vnc")))
+            .await
+            .unwrap();
+
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     }
 }

@@ -41,6 +41,8 @@ import type { SshAccessResponse } from '../models';
 import type { SteerRunRequest } from '../models';
 // @ts-ignore
 import type { SubmitAnswerRequest } from '../models';
+// @ts-ignore
+import type { VncPreviewResponse } from '../models';
 /**
  * HumanInTheLoopApi - axios parameter creator
  */
@@ -85,6 +87,46 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(sshAccessRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Starts or ensures Daytona Computer Use for the run sandbox and returns a signed noVNC preview URL.
+         * @summary Create Sandbox VNC Preview
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createSandboxVncPreview: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('createSandboxVncPreview', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/sandbox/vnc`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication SessionCookie required
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -535,6 +577,19 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Starts or ensures Daytona Computer Use for the run sandbox and returns a signed noVNC preview URL.
+         * @summary Create Sandbox VNC Preview
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createSandboxVncPreview(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VncPreviewResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createSandboxVncPreview(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.createSandboxVncPreview']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
@@ -683,6 +738,16 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.createRunSshAccess(id, sshAccessRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         * Starts or ensures Daytona Computer Use for the run sandbox and returns a signed noVNC preview URL.
+         * @summary Create Sandbox VNC Preview
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createSandboxVncPreview(id: string, options?: RawAxiosRequestConfig): AxiosPromise<VncPreviewResponse> {
+            return localVarFp.createSandboxVncPreview(id, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Generates a preview URL for a port exposed by the run\'s sandbox environment.
          * @summary Preview URL
          * @param {string} id Unique run identifier (ULID).
@@ -800,6 +865,17 @@ export class HumanInTheLoopApi extends BaseAPI {
      */
     public createRunSshAccess(id: string, sshAccessRequest: SshAccessRequest, options?: RawAxiosRequestConfig) {
         return HumanInTheLoopApiFp(this.configuration).createRunSshAccess(id, sshAccessRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Starts or ensures Daytona Computer Use for the run sandbox and returns a signed noVNC preview URL.
+     * @summary Create Sandbox VNC Preview
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createSandboxVncPreview(id: string, options?: RawAxiosRequestConfig) {
+        return HumanInTheLoopApiFp(this.configuration).createSandboxVncPreview(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

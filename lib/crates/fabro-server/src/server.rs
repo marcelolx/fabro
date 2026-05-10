@@ -36,7 +36,8 @@ pub use fabro_api::types::{
     RunError, RunManifest, RunStage, RunStatusResponse, SandboxDetails, SandboxFileEntry,
     SandboxFileListResponse, SshAccessRequest, SshAccessResponse, StageHandler, StageState,
     StartRunRequest, SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRepairRunIssue,
-    SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, WriteBlobResponse,
+    SystemRepairRunsResponse, SystemRunCounts, TimelineEntryResponse, VncPreviewResponse,
+    WriteBlobResponse,
 };
 use fabro_auth::{
     CredentialSource, VaultCredentialSource, auth_issue_message, parse_credential_secret,
