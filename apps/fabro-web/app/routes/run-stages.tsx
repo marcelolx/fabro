@@ -941,7 +941,9 @@ function CommandLogs({
 }) {
   if (!turn) {
     return (
-      <div className="px-2 py-6 text-sm text-fg-muted">No command output yet.</div>
+      <div className="pl-3 pr-4 text-sm text-fg-muted sm:pr-6 lg:pr-8">
+        No command output yet.
+      </div>
     );
   }
   return (
