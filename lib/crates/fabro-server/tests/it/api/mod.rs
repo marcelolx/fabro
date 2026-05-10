@@ -1,3 +1,4 @@
+mod auth_sessions;
 mod cli_auth_token;
 mod docs;
 mod install;

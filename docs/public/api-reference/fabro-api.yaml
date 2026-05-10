@@ -663,6 +663,72 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/auth/sessions:
+    get:
+      operationId: listAuthSessions
+      tags: [Auth]
+      summary: List authenticated sessions
+      description: Returns the current browser session and active CLI session chains for the authenticated user.
+      responses:
+        "200":
+          description: Authenticated sessions known to the server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionsResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/auth/sessions/{id}:
+    delete:
+      operationId: deleteAuthSession
+      tags: [Auth]
+      summary: Revoke an authenticated session
+      description: Revokes an active CLI session chain. Browser sessions are not revocable in this API version.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Session revoked
+        "400":
+          description: Malformed or non-revocable session id
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/demo/toggle:
     post:
       operationId: toggleDemo
@@ -3725,6 +3791,59 @@ components:
           type: string
           example: dev-token
         demoMode:
+          type: boolean
+
+    AuthSessionsResponse:
+      type: object
+      required:
+        - sessions
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthSession"
+
+    AuthSession:
+      type: object
+      required:
+        - id
+        - kind
+        - current
+        - provider
+        - login
+        - label
+        - createdAt
+        - lastSeenAt
+        - expiresAt
+        - revocable
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [browser, cli]
+        current:
+          type: boolean
+        provider:
+          type: string
+          example: github
+        login:
+          type: string
+        label:
+          type: string
+        userAgent:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        revocable:
           type: boolean
 
     AuthSessionUser:
