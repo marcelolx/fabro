@@ -27,6 +27,7 @@ import {
 export type PreviewRunArg = {
   port: number;
   expires_in_secs: number;
+  signed?: boolean;
 };
 
 export type PreviewMutationResult = {

@@ -7,13 +7,15 @@ import { formatAbsoluteTs } from "../lib/format";
 import { useRunSandboxDetails } from "../lib/queries";
 import type { SandboxDetails, SandboxResources, SandboxState } from "@qltysh/fabro-api-client";
 import FilesystemPanel from "./run-sandbox/filesystem-panel";
+import ServicesPanel from "./run-sandbox/services-panel";
 import VncPanel from "./run-sandbox/vnc-panel";
 
 export const handle = { wide: true, fullHeight: true };
 
-export type SandboxMode = "terminal" | "filesystem" | "vnc";
+export type SandboxMode = "terminal" | "services" | "filesystem" | "vnc";
 
 export function normalizeSandboxMode(value: string | null): SandboxMode {
+  if (value === "services") return "services";
   if (value === "filesystem") return "filesystem";
   if (value === "vnc") return "vnc";
   return "terminal";
@@ -276,6 +278,9 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
             if (mode === "terminal") {
               return <TerminalView runId={params.id} leading={modeToggle} />;
             }
+            if (mode === "services") {
+              return <ServicesPanel runId={params.id} leading={modeToggle} />;
+            }
             if (mode === "filesystem") {
               return <FilesystemPanel runId={params.id} leading={modeToggle} />;
             }
@@ -306,6 +311,11 @@ function ModeToggle({ mode, onChange, vncAvailable }: ModeToggleProps) {
         label="Terminal"
         active={mode === "terminal"}
         onClick={() => onChange("terminal")}
+      />
+      <ModeToggleButton
+        label="Services"
+        active={mode === "services"}
+        onClick={() => onChange("services")}
       />
       <ModeToggleButton
         label="Filesystem"

@@ -37,6 +37,13 @@ mock.module("../lib/queries", () => ({
     isValidating: false,
     mutate:       mock(() => Promise.resolve()),
   }),
+  useSandboxServices: () => ({
+    data:         undefined,
+    error:        undefined,
+    isLoading:    false,
+    isValidating: false,
+    mutate:       mock(() => Promise.resolve()),
+  }),
 }));
 
 mock.module("../components/terminal-view", () => ({
@@ -44,6 +51,13 @@ mock.module("../components/terminal-view", () => ({
   // header) is reachable from outer tab-presence assertions.
   default: ({ leading }: { leading?: ReactNode }) => <div>{leading}</div>,
   TERMINAL_DOCK_CLEARANCE_CLASS: "",
+}));
+
+// Stub the services panel the same way as terminal-view: render only the
+// leading slot so tab-presence assertions reach the mode toggle without
+// pulling in the panel's own data-fetching dependencies.
+mock.module("./run-sandbox/services-panel", () => ({
+  default: ({ leading }: { leading?: ReactNode }) => <div>{leading}</div>,
 }));
 
 // Stub @pierre/trees and @pierre/diffs runtime so the filesystem panel can
@@ -211,9 +225,9 @@ describe("RunSandbox route", () => {
         node.type === "button" && node.props.role === "tab",
     );
     // Docker provider hides the VNC tab.
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(3);
     const labels = tabs.map((tab) => tab.children.find((c) => typeof c === "string"));
-    expect(labels).toEqual(["Terminal", "Filesystem"]);
+    expect(labels).toEqual(["Terminal", "Services", "Filesystem"]);
     const selected = tabs.find((tab) => tab.props["aria-selected"] === true);
     expect(selected?.children.find((c) => typeof c === "string")).toBe("Terminal");
   });
@@ -235,9 +249,30 @@ describe("RunSandbox route", () => {
     const tabs = renderer.root.findAll(
       (node) => node.type === "button" && node.props.role === "tab",
     );
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(4);
     const labels = tabs.map((tab) => tab.children.find((c) => typeof c === "string"));
-    expect(labels).toEqual(["Terminal", "Filesystem", "VNC"]);
+    expect(labels).toEqual(["Terminal", "Services", "Filesystem", "VNC"]);
+  });
+
+  test("Services mode is selected when ?mode=services is requested", () => {
+    currentDetails = {
+      provider:     "docker",
+      name:         "fabro-run-abc",
+      id:           null,
+      state:        "running",
+      native_state: null,
+      region:       null,
+      image:        null,
+      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
+      labels:       {},
+      timestamps:   { created_at: null, last_activity_at: null },
+    };
+    const renderer = renderRoute("/runs/run_1/sandbox?mode=services");
+    const tabs = renderer.root.findAll(
+      (node) => node.type === "button" && node.props.role === "tab",
+    );
+    const selected = tabs.find((tab) => tab.props["aria-selected"] === true);
+    expect(selected?.children.find((c) => typeof c === "string")).toBe("Services");
   });
 
   test("Docker provider falls back to terminal when ?mode=vnc is requested", () => {
@@ -297,7 +332,8 @@ describe("normalizeSandboxMode", () => {
     expect(normalizeSandboxMode("unknown")).toBe("terminal");
   });
 
-  test("accepts filesystem and vnc", () => {
+  test("accepts services, filesystem, and vnc", () => {
+    expect(normalizeSandboxMode("services")).toBe("services");
     expect(normalizeSandboxMode("filesystem")).toBe("filesystem");
     expect(normalizeSandboxMode("vnc")).toBe("vnc");
   });

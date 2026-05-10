@@ -17,6 +17,7 @@ import type {
   RunSummary,
   SandboxDetails,
   SandboxFileListResponse,
+  SandboxServiceListResponse,
   ServerSettings,
   SystemInfoResponse,
   VncPreviewResponse,
@@ -208,6 +209,14 @@ export function useSandboxFiles(
   return useSWR<SandboxFileListResponse>(
     id && path ? queryKeys.runs.sandboxFiles(id, path, depth) : null,
     () => apiData(() => humanInTheLoopApi.listSandboxFiles(id!, path!, depth)),
+    { keepPreviousData: true },
+  );
+}
+
+export function useSandboxServices(id: string | undefined) {
+  return useSWR<SandboxServiceListResponse>(
+    id ? queryKeys.runs.sandboxServices(id) : null,
+    () => apiData(() => humanInTheLoopApi.listSandboxServices(id!)),
     { keepPreviousData: true },
   );
 }
