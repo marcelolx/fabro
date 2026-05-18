@@ -984,6 +984,7 @@ mod tests {
                 display_name: Some("Bedrock".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
+                agent_profile: Some(AgentProfileKind::OpenAi),
                 ..ProviderCatalogSettings::default()
             });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();
@@ -1016,6 +1017,7 @@ mod tests {
                 display_name: Some("Bedrock".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
+                agent_profile: Some(AgentProfileKind::OpenAi),
                 ..ProviderCatalogSettings::default()
             });
         settings
@@ -1066,6 +1068,7 @@ mod tests {
                 display_name: Some("Bedrock".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
+                agent_profile: Some(AgentProfileKind::OpenAi),
                 aliases: Some(vec!["br".to_string()]),
                 ..ProviderCatalogSettings::default()
             });
@@ -1143,6 +1146,7 @@ mod tests {
                 display_name: Some("Bedrock".to_string()),
                 adapter: Some("openai_compatible".to_string()),
                 base_url: Some("https://example.invalid/v1".to_string()),
+                agent_profile: Some(AgentProfileKind::OpenAi),
                 ..ProviderCatalogSettings::default()
             });
         let catalog = Catalog::from_builtin_with_overrides(&settings).unwrap();

@@ -777,10 +777,7 @@ async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow
         let provider = catalog.provider(&requested_provider_id).ok_or_else(|| {
             anyhow::anyhow!("provider '{requested_provider_id}' is not configured")
         })?;
-        (
-            provider.id.clone(),
-            provider.adapter.metadata().default_profile,
-        )
+        (provider.id.clone(), provider.agent_profile)
     };
     let model = record
         .model
@@ -798,6 +795,9 @@ async fn build_agent_session(state: &AppState, record: &SessionRecord) -> anyhow
     let llm_result = state.resolve_llm_client().await?;
     for (provider, issue) in &llm_result.auth_issues {
         warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
+    }
+    for issue in &llm_result.registration_issues {
+        warn!(provider = %issue.provider, error = %issue.error, "LLM provider unavailable due to registration issue");
     }
     if !llm_result.client.has_provider(provider_id.as_str()) {
         anyhow::bail!("LLM credentials not configured for provider '{provider_id}'");

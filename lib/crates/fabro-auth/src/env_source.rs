@@ -36,40 +36,33 @@ impl EnvCredentialSource {
         &self,
         provider: &CatalogProvider,
     ) -> Result<Option<ApiCredential>, ResolveError> {
-        let key = provider.credentials.iter().find_map(|credential_ref| {
-            let CredentialRef::Env(name) = credential_ref else {
-                return None;
-            };
-            self.lookup(name)
-        });
-
-        if key.is_none() && provider.credentials.is_empty() && provider.extra_headers.is_empty() {
-            return Ok(None);
-        }
-
-        let extra_headers = self.resolved_extra_headers(provider)?;
-
-        if key.is_none() && (!provider.credentials.is_empty() || extra_headers.is_empty()) {
-            return Ok(None);
-        }
-
-        let auth_header = key.map(|key| {
-            let policy = provider.adapter.metadata().api_key_header;
-            build_api_key_header(policy, key)
-        });
+        let (auth_header, extra_headers) = match &provider.auth {
+            Some(auth) => {
+                let Some(key) = auth.credentials.iter().find_map(|credential_ref| {
+                    let CredentialRef::Env(name) = credential_ref else {
+                        return None;
+                    };
+                    self.lookup(name)
+                }) else {
+                    return Ok(None);
+                };
+                (
+                    Some(build_api_key_header(auth.header.clone(), key)),
+                    self.resolved_extra_headers(provider)?,
+                )
+            }
+            None => (None, self.resolved_extra_headers(provider)?),
+        };
 
         let mut cred = ApiCredential {
             provider: provider.id.clone(),
             auth_header,
             extra_headers,
-            base_url: None,
+            base_url: provider.base_url.clone(),
             codex_mode: false,
             org_id: None,
             project_id: None,
         };
-        cred.base_url = self
-            .env_base_url(&provider.id)
-            .or_else(|| provider.base_url.clone());
         if provider.id == ProviderId::openai() && cred.auth_header.is_some() {
             cred.org_id = self.lookup(EnvVars::OPENAI_ORG_ID);
             cred.project_id = self.lookup(EnvVars::OPENAI_PROJECT_ID);
@@ -83,15 +76,6 @@ impl EnvCredentialSource {
             }
         }
         Ok(Some(cred))
-    }
-
-    fn env_base_url(&self, provider: &ProviderId) -> Option<String> {
-        match provider.as_str() {
-            ProviderId::ANTHROPIC => self.lookup(EnvVars::ANTHROPIC_BASE_URL),
-            ProviderId::OPENAI => self.lookup(EnvVars::OPENAI_BASE_URL),
-            ProviderId::GEMINI => self.lookup(EnvVars::GEMINI_BASE_URL),
-            _ => None,
-        }
     }
 
     fn resolved_extra_headers(
@@ -137,7 +121,7 @@ impl CredentialSource for EnvCredentialSource {
             match self.credential_for(provider) {
                 Ok(Some(credential)) => credentials.push(credential),
                 Ok(None) => {}
-                Err(ResolveError::NotConfigured(_)) if !provider.credentials.is_empty() => {}
+                Err(ResolveError::NotConfigured(_)) if provider.auth.is_some() => {}
                 Err(err) => auth_issues.push((provider.id.clone(), err)),
             }
         }
@@ -152,16 +136,11 @@ impl CredentialSource for EnvCredentialSource {
         catalog
             .providers()
             .iter()
-            .filter(|provider| {
-                provider
-                    .credentials
-                    .iter()
-                    .any(|credential_ref| {
-                        matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
-                    })
-                    || (!provider.extra_headers.is_empty()
-                        && provider.credentials.is_empty()
-                        && self.resolved_extra_headers(provider).is_ok())
+            .filter(|provider| match &provider.auth {
+                Some(auth) => auth.credentials.iter().any(|credential_ref| {
+                    matches!(credential_ref, CredentialRef::Env(name) if self.lookup(name).is_some())
+                }),
+                None => self.resolved_extra_headers(provider).is_ok(),
             })
             .map(|provider| provider.id.clone())
             .collect()
@@ -264,7 +243,10 @@ mod tests {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
 
 [models."acme-large"]
@@ -302,12 +284,13 @@ reasoning = false
     }
 
     #[tokio::test]
-    async fn resolve_registers_header_only_provider() {
+    async fn resolve_registers_no_auth_provider_with_env_extra_headers() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
 display_name = "Portkey Bedrock"
 adapter = "anthropic"
+agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]
@@ -337,7 +320,7 @@ reasoning_effort = "levels"
             .credentials
             .iter()
             .find(|credential| credential.provider == ProviderId::new("portkey"))
-            .expect("header-only provider should register when all headers resolve");
+            .expect("no-auth provider should register when extra headers resolve");
 
         assert!(credential.auth_header.is_none());
         assert_eq!(
@@ -351,12 +334,13 @@ reasoning_effort = "levels"
     }
 
     #[tokio::test]
-    async fn resolve_reports_missing_required_header() {
+    async fn resolve_reports_missing_required_header_for_no_auth_provider() {
         let catalog = catalog_with(
             r#"
 [providers.portkey]
 display_name = "Portkey Bedrock"
 adapter = "anthropic"
+agent_profile = "anthropic"
 base_url = "https://api.portkey.ai/v1"
 
 [providers.portkey.extra_headers]

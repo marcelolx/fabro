@@ -305,16 +305,17 @@ fn provider_settings_to_catalog(
     settings: ProviderSettings,
 ) -> model_catalog::ProviderCatalogSettings {
     model_catalog::ProviderCatalogSettings {
-        display_name:  settings.display_name,
-        adapter:       settings.adapter,
-        agent_profile: settings.agent_profile,
-        api_key_url:   settings.api_key_url,
-        base_url:      settings.base_url,
-        credentials:   settings.credentials,
-        extra_headers: settings.extra_headers,
-        priority:      settings.priority,
-        enabled:       settings.enabled,
-        aliases:       settings.aliases,
+        display_name:   settings.display_name,
+        adapter:        settings.adapter,
+        agent_profile:  settings.agent_profile,
+        auth:           settings.auth,
+        billing_policy: settings.billing_policy,
+        api_key_url:    settings.api_key_url,
+        base_url:       settings.base_url,
+        extra_headers:  settings.extra_headers,
+        priority:       settings.priority,
+        enabled:        settings.enabled,
+        aliases:        settings.aliases,
     }
 }
 
@@ -328,6 +329,7 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
         training,
         knowledge_cutoff,
         default,
+        probe,
         enabled,
         aliases,
         estimated_output_tps,
@@ -345,6 +347,7 @@ fn model_settings_to_catalog(settings: ModelSettings) -> model_catalog::ModelCat
         training,
         knowledge_cutoff,
         default,
+        probe,
         enabled,
         aliases,
         estimated_output_tps,
@@ -693,8 +696,10 @@ methods = ["dev-token"]
 display_name = "Acme"
 adapter = "openai_compatible"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 agent_profile = "anthropic"
+
+[llm.providers.acme.auth]
+credentials = ["env:ACME_API_KEY"]
 
 [llm.models."acme-large"]
 provider = "acme"

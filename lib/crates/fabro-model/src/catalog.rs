@@ -5,10 +5,12 @@ use std::sync::LazyLock;
 
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use strum::VariantArray;
 use toml::de::Error as TomlDeError;
+use tracing::warn;
 
 use crate::Speed;
-use crate::adapter::{AdapterKind, AdapterMetadata, AgentProfileKind};
+use crate::adapter::{AdapterKind, AgentProfileKind};
 use crate::ids::ProviderId;
 use crate::reasoning::ReasoningEffort;
 use crate::types::{Model, ModelCosts, ModelFeatures, ModelLimits, ReasoningEffortFeature};
@@ -36,25 +38,27 @@ pub struct LlmCatalogSettings {
 #[serde(deny_unknown_fields)]
 pub struct ProviderCatalogSettings {
     #[serde(default)]
-    pub display_name:  Option<String>,
+    pub display_name:   Option<String>,
     #[serde(default)]
-    pub adapter:       Option<String>,
+    pub adapter:        Option<String>,
     #[serde(default)]
-    pub agent_profile: Option<AgentProfileKind>,
+    pub agent_profile:  Option<AgentProfileKind>,
     #[serde(default)]
-    pub api_key_url:   Option<String>,
+    pub auth:           Option<ProviderAuthConfig>,
     #[serde(default)]
-    pub base_url:      Option<String>,
+    pub billing_policy: Option<BillingPolicy>,
     #[serde(default)]
-    pub credentials:   Option<Vec<CredentialRef>>,
+    pub api_key_url:    Option<String>,
     #[serde(default)]
-    pub extra_headers: Option<HashMap<String, HeaderValueRef>>,
+    pub base_url:       Option<String>,
     #[serde(default)]
-    pub priority:      Option<i32>,
+    pub extra_headers:  Option<HashMap<String, HeaderValueRef>>,
     #[serde(default)]
-    pub enabled:       Option<bool>,
+    pub priority:       Option<i32>,
     #[serde(default)]
-    pub aliases:       Option<Vec<String>>,
+    pub enabled:        Option<bool>,
+    #[serde(default)]
+    pub aliases:        Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -76,6 +80,8 @@ pub struct ModelCatalogSettings {
     pub knowledge_cutoff:     Option<String>,
     #[serde(default)]
     pub default:              Option<bool>,
+    #[serde(default)]
+    pub probe:                Option<bool>,
     #[serde(default)]
     pub enabled:              Option<bool>,
     #[serde(default)]
@@ -203,6 +209,104 @@ pub enum CredentialRefParseError {
     EmptyCredential,
     #[error("credential reference is missing a name after `env:`")]
     EmptyEnv,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderAuthConfig {
+    pub credentials: Vec<CredentialRef>,
+    #[serde(default)]
+    pub header:      ApiKeyHeaderPolicy,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ApiKeyHeaderPolicy {
+    #[default]
+    Bearer,
+    Custom {
+        name: String,
+    },
+}
+
+impl Serialize for ApiKeyHeaderPolicy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Bearer => serializer.serialize_str("bearer"),
+            Self::Custom { name } => {
+                use serde::ser::SerializeMap;
+
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("custom", name)?;
+                map.end()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ApiKeyHeaderPolicyInput {
+    String(String),
+    Table(ApiKeyHeaderPolicyTable),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApiKeyHeaderPolicyTable {
+    custom: String,
+}
+
+impl<'de> Deserialize<'de> for ApiKeyHeaderPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        match ApiKeyHeaderPolicyInput::deserialize(deserializer)? {
+            ApiKeyHeaderPolicyInput::String(value) if value == "bearer" => Ok(Self::Bearer),
+            ApiKeyHeaderPolicyInput::String(value) => Err(D::Error::custom(format!(
+                "API key header must be `bearer`, got `{value}`"
+            ))),
+            ApiKeyHeaderPolicyInput::Table(table) => {
+                validate_header_name(&table.custom).map_err(D::Error::custom)?;
+                Ok(Self::Custom { name: table.custom })
+            }
+        }
+    }
+}
+
+fn validate_header_name(name: &str) -> Result<(), &'static str> {
+    http::HeaderName::from_bytes(name.as_bytes())
+        .map(|_| ())
+        .map_err(|_| "custom header name must be a valid HTTP header name")
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::IntoStaticStr,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum BillingPolicy {
+    #[serde(rename = "openai")]
+    #[strum(to_string = "openai")]
+    OpenAi,
+    Anthropic,
+    Gemini,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -362,16 +466,17 @@ pub struct FallbackTarget {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogProvider {
-    pub id:            ProviderId,
-    pub display_name:  String,
-    pub adapter:       AdapterKind,
-    pub agent_profile: AgentProfileKind,
-    pub api_key_url:   Option<String>,
-    pub base_url:      Option<String>,
-    pub credentials:   Vec<CredentialRef>,
-    pub extra_headers: HashMap<String, HeaderValueRef>,
-    pub priority:      i32,
-    pub aliases:       Vec<String>,
+    pub id:             ProviderId,
+    pub display_name:   String,
+    pub adapter:        AdapterKind,
+    pub agent_profile:  AgentProfileKind,
+    pub auth:           Option<ProviderAuthConfig>,
+    pub billing_policy: BillingPolicy,
+    pub api_key_url:    Option<String>,
+    pub base_url:       Option<String>,
+    pub extra_headers:  HashMap<String, HeaderValueRef>,
+    pub priority:       i32,
+    pub aliases:        Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -386,6 +491,7 @@ pub struct CatalogModelSettings {
     pub agent_profile: AgentProfileKind,
     pub controls:      CatalogModelControls,
     pub speed_costs:   HashMap<Speed, ModelCosts>,
+    probe:             bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -431,8 +537,8 @@ pub enum CatalogBuildError {
         provider: ProviderId,
         adapter:  String,
     },
-    #[error("provider '{provider}' uses adapter 'openai_compatible' without base_url")]
-    MissingOpenAiCompatibleBaseUrl { provider: ProviderId },
+    #[error("provider '{provider}' API-key auth must declare at least one credential")]
+    EmptyApiKeyCredentials { provider: ProviderId },
     #[error("provider identifier '{identifier}' is declared by both '{first}' and '{second}'")]
     DuplicateProviderIdentifier {
         identifier: String,
@@ -466,18 +572,8 @@ pub enum CatalogBuildError {
         #[source]
         source: strum::ParseError,
     },
-    #[error(
-        "model '{model}' declares unsupported reasoning_effort '{value}' for adapter '{adapter}'"
-    )]
-    UnsupportedReasoningEffort {
-        model:   String,
-        adapter: String,
-        value:   ReasoningEffort,
-    },
-    #[error(
-        "model '{model}' declares reasoning_effort controls but features.reasoning_effort is none"
-    )]
-    ReasoningEffortWithoutFeature { model: String },
+    #[error("model '{model}' declares reasoning_effort controls but features.reasoning is false")]
+    ReasoningEffortControlsWithoutReasoning { model: String },
     #[error("model '{model}' declares reasoning_effort feature but features.reasoning is false")]
     ReasoningEffortWithoutReasoning { model: String },
     #[error(
@@ -493,12 +589,6 @@ pub enum CatalogBuildError {
     },
     #[error("model '{model}' must not declare standard in controls.speed")]
     StandardSpeedControl { model: String },
-    #[error("model '{model}' declares unsupported speed '{speed}' for adapter '{adapter}'")]
-    UnsupportedSpeed {
-        model:   String,
-        adapter: String,
-        speed:   Speed,
-    },
     #[error("model '{model}' has costs.speed.{speed} without declaring controls.speed")]
     UndeclaredSpeedCost { model: String, speed: Speed },
 }
@@ -604,6 +694,7 @@ impl Catalog {
         }
 
         models_with_settings.sort_by(|(left, _), (right, _)| model_order(left, right));
+        warn_multiple_probe_models(&models_with_settings);
         let mut model_settings_by_id = HashMap::new();
         let mut models = Vec::new();
         for (model, settings) in models_with_settings {
@@ -766,8 +857,10 @@ impl Catalog {
             .providers
             .iter()
             .filter(|provider| {
-                provider.credentials.iter().any(|credential| {
-                    matches!(credential, CredentialRef::Env(name) if std::env::var(name).is_ok())
+                provider.auth.as_ref().is_some_and(|auth| {
+                    auth.credentials.iter().any(|credential| {
+                        matches!(credential, CredentialRef::Env(name) if std::env::var(name).is_ok())
+                    })
                 })
             })
             .map(|provider| provider.id.clone())
@@ -799,15 +892,14 @@ impl Catalog {
     #[must_use]
     pub fn probe_for_provider(&self, p: &ProviderId) -> Option<&Model> {
         let provider_id = self.provider(p).map_or(p, |provider| &provider.id);
-        let override_id: Option<&str> = match provider_id.as_str() {
-            ProviderId::ANTHROPIC => Some("claude-haiku-4-5"),
-            ProviderId::OPENAI => Some("gpt-5.4-mini"),
-            _ => None,
-        };
-        if let Some(id) = override_id {
-            if let Some(info) = self.get(id) {
-                return Some(info);
-            }
+        if let Some(model) = self.models.iter().find(|model| {
+            &model.provider == provider_id
+                && self
+                    .model_settings
+                    .get(&model.id)
+                    .is_some_and(|settings| settings.probe)
+        }) {
+            return Some(model);
         }
         self.default_for_provider(provider_id)
     }
@@ -913,16 +1005,17 @@ fn merge_provider_settings(
     fallback: ProviderCatalogSettings,
 ) -> ProviderCatalogSettings {
     ProviderCatalogSettings {
-        display_name:  higher.display_name.or(fallback.display_name),
-        adapter:       higher.adapter.or(fallback.adapter),
-        agent_profile: higher.agent_profile.or(fallback.agent_profile),
-        api_key_url:   higher.api_key_url.or(fallback.api_key_url),
-        base_url:      higher.base_url.or(fallback.base_url),
-        credentials:   higher.credentials.or(fallback.credentials),
-        extra_headers: higher.extra_headers.or(fallback.extra_headers),
-        priority:      higher.priority.or(fallback.priority),
-        enabled:       higher.enabled.or(fallback.enabled),
-        aliases:       higher.aliases.or(fallback.aliases),
+        display_name:   higher.display_name.or(fallback.display_name),
+        adapter:        higher.adapter.or(fallback.adapter),
+        agent_profile:  higher.agent_profile.or(fallback.agent_profile),
+        auth:           higher.auth.or(fallback.auth),
+        billing_policy: higher.billing_policy.or(fallback.billing_policy),
+        api_key_url:    higher.api_key_url.or(fallback.api_key_url),
+        base_url:       higher.base_url.or(fallback.base_url),
+        extra_headers:  higher.extra_headers.or(fallback.extra_headers),
+        priority:       higher.priority.or(fallback.priority),
+        enabled:        higher.enabled.or(fallback.enabled),
+        aliases:        higher.aliases.or(fallback.aliases),
     }
 }
 
@@ -939,6 +1032,7 @@ fn merge_model_settings(
         training:             higher.training.or(fallback.training),
         knowledge_cutoff:     higher.knowledge_cutoff.or(fallback.knowledge_cutoff),
         default:              higher.default.or(fallback.default),
+        probe:                higher.probe.or(fallback.probe),
         enabled:              higher.enabled.or(fallback.enabled),
         aliases:              higher.aliases.or(fallback.aliases),
         estimated_output_tps: higher
@@ -1053,28 +1147,63 @@ fn build_providers(
                 adapter:  adapter_name,
             }
         })?;
-        if adapter == AdapterKind::OpenAiCompatible && settings.base_url.is_none() {
-            return Err(CatalogBuildError::MissingOpenAiCompatibleBaseUrl {
-                provider: provider_id,
-            });
-        }
+        let defaults = adapter_defaults(adapter);
+        let agent_profile = settings.agent_profile.unwrap_or(defaults.agent_profile);
+        let auth = settings.auth.clone();
+        validate_provider_auth(&provider_id, auth.as_ref())?;
 
         providers.push(CatalogProvider {
             id: provider_id,
             display_name: settings.display_name.clone().unwrap_or_else(|| id.clone()),
             adapter,
-            agent_profile: settings
-                .agent_profile
-                .unwrap_or_else(|| adapter.metadata().default_profile),
+            agent_profile,
+            auth,
+            billing_policy: settings.billing_policy.unwrap_or(defaults.billing_policy),
             api_key_url: settings.api_key_url.clone(),
             base_url: settings.base_url.clone(),
-            credentials: settings.credentials.clone().unwrap_or_default(),
             extra_headers: settings.extra_headers.clone().unwrap_or_default(),
             priority: settings.priority.unwrap_or_default(),
             aliases: settings.aliases.clone().unwrap_or_default(),
         });
     }
     Ok(providers)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AdapterDefaults {
+    agent_profile:  AgentProfileKind,
+    billing_policy: BillingPolicy,
+}
+
+fn adapter_defaults(adapter: AdapterKind) -> AdapterDefaults {
+    match adapter {
+        AdapterKind::Anthropic => AdapterDefaults {
+            agent_profile:  AgentProfileKind::Anthropic,
+            billing_policy: BillingPolicy::Anthropic,
+        },
+        AdapterKind::OpenAi | AdapterKind::OpenAiCompatible => AdapterDefaults {
+            agent_profile:  AgentProfileKind::OpenAi,
+            billing_policy: BillingPolicy::OpenAi,
+        },
+        AdapterKind::Gemini => AdapterDefaults {
+            agent_profile:  AgentProfileKind::Gemini,
+            billing_policy: BillingPolicy::Gemini,
+        },
+    }
+}
+
+fn validate_provider_auth(
+    provider: &ProviderId,
+    auth: Option<&ProviderAuthConfig>,
+) -> Result<(), CatalogBuildError> {
+    match auth {
+        Some(auth) if auth.credentials.is_empty() => {
+            Err(CatalogBuildError::EmptyApiKeyCredentials {
+                provider: provider.clone(),
+            })
+        }
+        _ => Ok(()),
+    }
 }
 
 fn build_provider_aliases(
@@ -1125,8 +1254,7 @@ fn build_model(
                 field: "features",
             })?;
     let model_features = build_model_features(model_id, features)?;
-    let adapter = provider.adapter.metadata();
-    let controls = build_model_controls(model_id, &model_features, settings, adapter)?;
+    let controls = build_model_controls(model_id, &model_features, settings)?;
     let costs = build_model_costs(settings.costs.as_ref());
     let speed_costs = build_speed_costs(model_id, settings.costs.as_ref(), &controls)?;
 
@@ -1156,8 +1284,31 @@ fn build_model(
         agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,
+        probe: settings.probe.unwrap_or_default(),
     };
     Ok((model, catalog_settings))
+}
+
+fn warn_multiple_probe_models(models_with_settings: &[(Model, CatalogModelSettings)]) {
+    let mut probes_by_provider = BTreeMap::<ProviderId, Vec<String>>::new();
+    for (model, settings) in models_with_settings {
+        if settings.probe {
+            probes_by_provider
+                .entry(model.provider.clone())
+                .or_default()
+                .push(model.id.clone());
+        }
+    }
+
+    for (provider, models) in probes_by_provider {
+        if models.len() > 1 {
+            warn!(
+                provider = %provider,
+                models = ?models,
+                "Multiple probe models configured for provider"
+            );
+        }
+    }
 }
 
 fn build_model_features(
@@ -1239,20 +1390,20 @@ fn build_model_controls(
     model_id: &str,
     features: &ModelFeatures,
     settings: &ModelCatalogSettings,
-    adapter: &'static AdapterMetadata,
 ) -> Result<CatalogModelControls, CatalogBuildError> {
-    let supports_reasoning_effort = features.reasoning_effort == ReasoningEffortFeature::Levels;
+    let supports_native_reasoning_effort =
+        features.reasoning_effort == ReasoningEffortFeature::Levels;
     let reasoning_effort = match settings
         .controls
         .as_ref()
         .and_then(|controls| controls.reasoning_effort.as_ref())
     {
-        Some(values) if !supports_reasoning_effort && !values.is_empty() => {
-            return Err(CatalogBuildError::ReasoningEffortWithoutFeature {
+        Some(values) if !features.reasoning && !values.is_empty() => {
+            return Err(CatalogBuildError::ReasoningEffortControlsWithoutReasoning {
                 model: model_id.to_string(),
             });
         }
-        Some(values) if values.is_empty() && supports_reasoning_effort => {
+        Some(values) if values.is_empty() && supports_native_reasoning_effort => {
             return Err(CatalogBuildError::EmptyReasoningEffortControls {
                 model: model_id.to_string(),
             });
@@ -1261,18 +1412,9 @@ fn build_model_controls(
             .iter()
             .map(|value| parse_reasoning_effort(model_id, value))
             .collect::<Result<Vec<_>, _>>()?,
-        None if supports_reasoning_effort => adapter.controls.native_reasoning_effort.to_vec(),
+        None if supports_native_reasoning_effort => ReasoningEffort::VARIANTS.to_vec(),
         None => Vec::new(),
     };
-    for value in &reasoning_effort {
-        if !adapter.controls.native_reasoning_effort.contains(value) {
-            return Err(CatalogBuildError::UnsupportedReasoningEffort {
-                model:   model_id.to_string(),
-                adapter: adapter.kind.to_string(),
-                value:   *value,
-            });
-        }
-    }
 
     let speed = settings
         .controls
@@ -1281,7 +1423,7 @@ fn build_model_controls(
         .map(|values| {
             values
                 .iter()
-                .map(|value| parse_speed_control(model_id, value, adapter))
+                .map(|value| parse_speed_control(model_id, value))
                 .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?
@@ -1312,22 +1454,11 @@ fn parse_speed(model_id: &str, value: &str) -> Result<Speed, CatalogBuildError> 
     })
 }
 
-fn parse_speed_control(
-    model_id: &str,
-    value: &str,
-    adapter: &'static AdapterMetadata,
-) -> Result<Speed, CatalogBuildError> {
+fn parse_speed_control(model_id: &str, value: &str) -> Result<Speed, CatalogBuildError> {
     let speed = parse_speed(model_id, value)?;
     if speed == Speed::Standard {
         return Err(CatalogBuildError::StandardSpeedControl {
             model: model_id.to_string(),
-        });
-    }
-    if !adapter.controls.additional_speeds.contains(&speed) {
-        return Err(CatalogBuildError::UnsupportedSpeed {
-            model: model_id.to_string(),
-            adapter: adapter.kind.to_string(),
-            speed,
         });
     }
     Ok(speed)
@@ -1514,10 +1645,13 @@ enabled = false
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
-credentials = ["env:ACME_API_KEY"]
 priority = 120
 aliases = ["acme-ai"]
+
+[providers.acme.auth]
+credentials = ["env:ACME_API_KEY"]
 
 [models."acme-large"]
 provider = "acme"
@@ -1572,6 +1706,7 @@ enabled = true
             provider.base_url.as_deref(),
             Some("http://localhost:11434/v1")
         );
+        assert_eq!(provider.billing_policy, BillingPolicy::None);
 
         assert!(catalog.list(Some(&ollama)).is_empty());
         assert!(catalog.default_for_provider(&ollama).is_none());
@@ -1789,6 +1924,14 @@ enabled = true
                 .reasoning_effort,
             ReasoningEffort::VARIANTS
         );
+        assert_eq!(
+            catalog
+                .model_settings("claude-sonnet-4-5")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            ReasoningEffort::VARIANTS
+        );
     }
 
     #[test]
@@ -1818,6 +1961,7 @@ enabled = true
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 enabled = true
 
 [models.one]
@@ -1866,6 +2010,7 @@ reasoning = false
 [providers.enabled]
 display_name = "Enabled"
 adapter = "openai"
+agent_profile = "openai"
 enabled = true
 
 [providers.disabled]
@@ -1933,11 +2078,13 @@ reasoning = false
 [providers.low]
 display_name = "Low"
 adapter = "openai"
+agent_profile = "openai"
 priority = 10
 
 [providers.high]
 display_name = "High"
 adapter = "openai"
+agent_profile = "openai"
 priority = 20
 
 [models.low_default]
@@ -1993,11 +2140,13 @@ reasoning = false
 [providers.zeta]
 display_name = "Zeta"
 adapter = "openai"
+agent_profile = "openai"
 priority = 20
 
 [providers.alpha]
 display_name = "Alpha"
 adapter = "openai"
+agent_profile = "openai"
 priority = 10
 
 [models.zeta_two]
@@ -2061,6 +2210,7 @@ reasoning = false
 [providers.canonical]
 display_name = "Canonical"
 adapter = "openai"
+agent_profile = "openai"
 aliases = ["alias"]
 
 [models.default_model]
@@ -2104,6 +2254,235 @@ reasoning = false
     }
 
     #[test]
+    fn probe_for_provider_prefers_enabled_probe_model_over_provider_default() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.probe_model]
+provider = "test"
+display_name = "Probe Model"
+family = "test"
+probe = true
+
+[models.probe_model.limits]
+context_window = 1000
+
+[models.probe_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::new("test"))
+                .unwrap()
+                .id,
+            "probe_model"
+        );
+    }
+
+    #[test]
+    fn probe_for_provider_falls_back_to_provider_default_when_no_probe_marked() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.other_model]
+provider = "test"
+display_name = "Other Model"
+family = "test"
+
+[models.other_model.limits]
+context_window = 1000
+
+[models.other_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::new("test"))
+                .unwrap()
+                .id,
+            "default_model"
+        );
+    }
+
+    #[test]
+    fn probe_false_override_clears_inherited_builtin_probe_marker() {
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r#"
+[models."gpt-5.4-mini"]
+probe = false
+"#,
+        ))
+        .expect("sparse built-in model override should build");
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::openai())
+                .unwrap()
+                .id,
+            "gpt-5.4"
+        );
+    }
+
+    #[test]
+    fn probe_for_provider_resolves_provider_alias() {
+        let layer = minimal_settings(
+            r#"
+[providers.canonical]
+display_name = "Canonical"
+adapter = "openai"
+agent_profile = "openai"
+aliases = ["alias"]
+
+[models.default_model]
+provider = "canonical"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.probe_model]
+provider = "canonical"
+display_name = "Probe Model"
+family = "test"
+probe = true
+
+[models.probe_model.limits]
+context_window = 1000
+
+[models.probe_model.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+
+        assert_eq!(
+            catalog
+                .probe_for_provider(&ProviderId::new("alias"))
+                .unwrap()
+                .id,
+            "probe_model"
+        );
+    }
+
+    #[test]
+    fn multiple_probe_models_are_non_fatal_and_select_a_probe_model() {
+        let layer = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.default_model]
+provider = "test"
+display_name = "Default Model"
+family = "test"
+default = true
+
+[models.default_model.limits]
+context_window = 1000
+
+[models.default_model.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.first_probe]
+provider = "test"
+display_name = "First Probe"
+family = "test"
+probe = true
+
+[models.first_probe.limits]
+context_window = 1000
+
+[models.first_probe.features]
+tools = false
+vision = false
+reasoning = false
+
+[models.second_probe]
+provider = "test"
+display_name = "Second Probe"
+family = "test"
+probe = true
+
+[models.second_probe.limits]
+context_window = 1000
+
+[models.second_probe.features]
+tools = false
+vision = false
+reasoning = false
+"#,
+        );
+        let catalog = Catalog::from_settings(&layer).unwrap();
+        let selected = catalog
+            .probe_for_provider(&ProviderId::new("test"))
+            .unwrap()
+            .id
+            .as_str();
+
+        assert!(["first_probe", "second_probe"].contains(&selected));
+        assert_ne!(selected, "default_model");
+    }
+
+    #[test]
     fn provider_agent_profile_overrides_adapter_default() {
         let layer = minimal_settings(
             r#"
@@ -2142,6 +2521,52 @@ reasoning = false
             catalog.effective_agent_profile(&ProviderId::new("test"), Some("default_model")),
             Some(AgentProfileKind::Anthropic)
         );
+    }
+
+    #[test]
+    fn adapter_defaults_provider_agent_profile_and_billing_policy() {
+        let settings = minimal_settings(
+            r#"
+[providers.anthropic]
+display_name = "Anthropic"
+adapter = "anthropic"
+
+[providers.openai]
+display_name = "OpenAI"
+adapter = "openai"
+
+[providers.gemini]
+display_name = "Gemini"
+adapter = "gemini"
+
+[providers.compat]
+display_name = "Compatible"
+adapter = "openai_compatible"
+"#,
+        );
+
+        let providers = build_providers(&settings).unwrap();
+        let provider = |id: &str| {
+            providers
+                .iter()
+                .find(|provider| provider.id.as_str() == id)
+                .unwrap()
+        };
+
+        assert_eq!(
+            provider("anthropic").agent_profile,
+            AgentProfileKind::Anthropic
+        );
+        assert_eq!(
+            provider("anthropic").billing_policy,
+            BillingPolicy::Anthropic
+        );
+        assert_eq!(provider("openai").agent_profile, AgentProfileKind::OpenAi);
+        assert_eq!(provider("openai").billing_policy, BillingPolicy::OpenAi);
+        assert_eq!(provider("gemini").agent_profile, AgentProfileKind::Gemini);
+        assert_eq!(provider("gemini").billing_policy, BillingPolicy::Gemini);
+        assert_eq!(provider("compat").agent_profile, AgentProfileKind::OpenAi);
+        assert_eq!(provider("compat").billing_policy, BillingPolicy::OpenAi);
     }
 
     #[test]
@@ -2241,7 +2666,7 @@ reasoning = false
     }
 
     #[test]
-    fn omitted_agent_profile_preserves_adapter_default() {
+    fn omitted_agent_profile_uses_adapter_default() {
         let layer = minimal_settings(
             r#"
 [providers.test]
@@ -2267,8 +2692,162 @@ reasoning = false
         let catalog = Catalog::from_settings(&layer).unwrap();
 
         assert_eq!(
+            catalog
+                .provider(&ProviderId::new("test"))
+                .unwrap()
+                .agent_profile,
+            AgentProfileKind::Gemini
+        );
+        assert_eq!(
             catalog.effective_agent_profile(&ProviderId::new("test"), Some("default_model")),
             Some(AgentProfileKind::Gemini)
+        );
+    }
+
+    #[test]
+    fn provider_auth_modes_and_billing_policy_are_catalog_owned() {
+        let settings = minimal_settings(
+            r#"
+[providers.bearer]
+display_name = "Bearer"
+adapter = "openai"
+
+[providers.bearer.auth]
+credentials = ["credential:bearer", "env:BEARER_API_KEY"]
+
+[providers.custom]
+display_name = "Custom"
+adapter = "gemini"
+
+[providers.custom.auth]
+credentials = ["env:CUSTOM_API_KEY"]
+header = { custom = "x-api-key" }
+
+[providers.none]
+display_name = "No Auth"
+adapter = "openai_compatible"
+billing_policy = "none"
+"#,
+        );
+
+        let providers = build_providers(&settings).unwrap();
+        let provider = |id: &str| {
+            providers
+                .iter()
+                .find(|provider| provider.id.as_str() == id)
+                .unwrap()
+        };
+
+        let bearer = provider("bearer");
+        assert_eq!(bearer.billing_policy, BillingPolicy::OpenAi);
+        assert_eq!(
+            bearer.auth,
+            Some(ProviderAuthConfig {
+                credentials: vec![
+                    CredentialRef::Credential("bearer".to_string()),
+                    CredentialRef::Env("BEARER_API_KEY".to_string()),
+                ],
+                header:      ApiKeyHeaderPolicy::Bearer,
+            })
+        );
+
+        let custom = provider("custom");
+        assert_eq!(custom.billing_policy, BillingPolicy::Gemini);
+        assert_eq!(
+            custom.auth,
+            Some(ProviderAuthConfig {
+                credentials: vec![CredentialRef::Env("CUSTOM_API_KEY".to_string())],
+                header:      ApiKeyHeaderPolicy::Custom {
+                    name: "x-api-key".to_string(),
+                },
+            })
+        );
+
+        let no_auth = provider("none");
+        assert_eq!(no_auth.billing_policy, BillingPolicy::None);
+        assert!(no_auth.auth.is_none());
+    }
+
+    #[test]
+    fn provider_auth_header_defaults_to_bearer_when_omitted() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+
+[providers.test.auth]
+credentials = ["env:TEST_API_KEY"]
+"#,
+        );
+        let providers = build_providers(&settings).unwrap();
+        let test = providers
+            .iter()
+            .find(|provider| provider.id.as_str() == "test")
+            .unwrap();
+        assert_eq!(
+            test.auth.as_ref().unwrap().header,
+            ApiKeyHeaderPolicy::Bearer
+        );
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_invalid_provider_auth_configs() {
+        let empty_api_key_credentials = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+credentials = []
+"#,
+        );
+        assert!(matches!(
+            Catalog::from_settings(&empty_api_key_credentials).unwrap_err(),
+            CatalogBuildError::EmptyApiKeyCredentials { provider }
+                if provider == ProviderId::new("test")
+        ));
+    }
+
+    #[test]
+    fn provider_auth_deserialization_rejects_invalid_auth_shape() {
+        let invalid_header = toml::from_str::<LlmCatalogSettings>(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+credentials = ["env:TEST_API_KEY"]
+header = { custom = "bad header" }
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            invalid_header
+                .to_string()
+                .contains("custom header name must be a valid HTTP header name")
+        );
+
+        let legacy_type_tag = toml::from_str::<LlmCatalogSettings>(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[providers.test.auth]
+type = "api_key"
+credentials = ["env:TEST_API_KEY"]
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            legacy_type_tag.to_string().contains("unknown field `type`"),
+            "expected unknown-field error for legacy `type` key, got: {legacy_type_tag}"
         );
     }
 
@@ -2279,6 +2858,7 @@ reasoning = false
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"
@@ -2310,6 +2890,7 @@ reasoning_effort = ["turbo"]
 [providers.test]
 display_name = "Test"
 adapter = "anthropic"
+agent_profile = "anthropic"
 
 [models.model]
 provider = "test"
@@ -2343,6 +2924,7 @@ input_cost_per_mtok = 1.0
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"
@@ -2383,17 +2965,19 @@ reasoning_effort = ["low", "medium"]
     }
 
     #[test]
-    fn catalog_from_settings_rejects_reasoning_effort_controls_when_feature_is_none() {
+    fn catalog_from_settings_accepts_reasoning_effort_controls_without_native_effort_feature() {
         let settings = minimal_settings(
             r#"
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"
 display_name = "Model"
 family = "test"
+default = true
 
 [models.model.limits]
 context_window = 1000
@@ -2409,9 +2993,53 @@ reasoning_effort = ["low"]
 "#,
         );
 
+        let catalog = Catalog::from_settings(&settings).unwrap();
+        let model = catalog.get("model").unwrap();
+        assert_eq!(
+            model.features.reasoning_effort,
+            crate::ReasoningEffortFeature::None
+        );
+        assert_eq!(
+            catalog
+                .model_settings("model")
+                .unwrap()
+                .controls
+                .reasoning_effort,
+            vec![ReasoningEffort::Low]
+        );
+    }
+
+    #[test]
+    fn catalog_from_settings_rejects_reasoning_effort_controls_without_reasoning() {
+        let settings = minimal_settings(
+            r#"
+[providers.test]
+display_name = "Test"
+adapter = "openai"
+agent_profile = "openai"
+
+[models.model]
+provider = "test"
+display_name = "Model"
+family = "test"
+
+[models.model.limits]
+context_window = 1000
+
+[models.model.features]
+tools = true
+vision = false
+reasoning = false
+reasoning_effort = "none"
+
+[models.model.controls]
+reasoning_effort = ["low"]
+"#,
+        );
+
         assert!(matches!(
             Catalog::from_settings(&settings).unwrap_err(),
-            CatalogBuildError::ReasoningEffortWithoutFeature { model }
+            CatalogBuildError::ReasoningEffortControlsWithoutReasoning { model }
                 if model == "model"
         ));
     }
@@ -2423,6 +3051,7 @@ reasoning_effort = ["low"]
 [providers.test]
 display_name = "Test"
 adapter = "openai"
+agent_profile = "openai"
 
 [models.model]
 provider = "test"

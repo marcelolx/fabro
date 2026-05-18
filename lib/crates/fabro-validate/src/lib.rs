@@ -213,7 +213,10 @@ mod tests {
 [providers.venice]
 display_name = "Venice"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.venice.ai/api/v1"
+
+[providers.venice.auth]
 credentials = ["env:VENICE_API_KEY"]
 
 [models."venice-large"]

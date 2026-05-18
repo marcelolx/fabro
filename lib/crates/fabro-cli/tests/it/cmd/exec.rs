@@ -121,7 +121,7 @@ fn exec_accepts_configured_custom_provider_from_settings() {
     let context = test_context!();
     context.write_home(
         ".fabro/settings.toml",
-        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nagent_profile = \"openai\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[llm.providers.bedrock.auth]\ncredentials = [\"env:BEDROCK_API_KEY\"]\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
     );
 
     let mut cmd = context.exec_cmd();
@@ -186,7 +186,7 @@ fn exec_server_target_accepts_configured_custom_provider_from_settings() {
     let context = test_context!();
     context.write_home(
         ".fabro/settings.toml",
-        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
+        "_version = 1\n\n[llm.providers.bedrock]\nadapter = \"openai_compatible\"\nagent_profile = \"openai\"\nbase_url = \"https://bedrock.example.invalid/v1\"\n\n[llm.providers.bedrock.auth]\ncredentials = [\"env:BEDROCK_API_KEY\"]\n\n[cli.exec.model]\nprovider = \"bedrock\"\nname = \"bedrock-claude-sonnet-4-6\"\n",
     );
     let server = MockServer::start();
     server.mock(|when, then| {
@@ -410,14 +410,22 @@ fn exec_direct_provider_auth_failure_stays_exit_1() {
             }));
     });
 
+    // Override anthropic base_url via settings to point to the mock server
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            "_version = 1\n\n[llm.providers.anthropic]\nbase_url = \"{}/v1\"\n",
+            server.base_url()
+        ),
+    );
+
     let mut cmd = context.exec_cmd();
     cmd.env_clear();
     preserve_coverage_env!(cmd);
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
         .env("FABRO_HTTP_PROXY_POLICY", "disabled")
-        .env("ANTHROPIC_API_KEY", "test-key")
-        .env("ANTHROPIC_BASE_URL", format!("{}/v1", server.base_url()));
+        .env("ANTHROPIC_API_KEY", "test-key");
     cmd.args([
         "--provider",
         "anthropic",

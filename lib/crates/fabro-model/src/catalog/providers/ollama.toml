@@ -1,8 +1,8 @@
 [providers.ollama]
 display_name = "Ollama"
 adapter = "openai_compatible"
+billing_policy = "none"
 base_url = "http://localhost:11434/v1"
-credentials = ["credential:ollama", "env:OLLAMA_API_KEY"]
 priority = 30
 enabled = false
 

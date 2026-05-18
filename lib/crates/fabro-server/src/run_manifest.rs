@@ -41,8 +41,10 @@ use fabro_workflow::{Error as WorkflowError, ManifestPath};
 use futures_util::stream::{self, StreamExt};
 use tokio::process::Command;
 use tokio::time;
+use tracing::warn;
 
 use crate::server::AppState;
+use crate::server_secrets::LlmClientResult;
 
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
@@ -472,10 +474,14 @@ async fn build_preflight_report(
     }
 
     let catalog = state.catalog();
-    let configured_providers = state
-        .llm_source
-        .configured_providers(catalog.as_ref())
-        .await;
+    let llm_result = state.resolve_llm_client().await;
+    let configured_providers = match &llm_result {
+        Ok(result) => result.provider_ids(),
+        Err(err) => {
+            warn!(error = ?err, "Failed to resolve LLM client while checking ready providers");
+            Vec::new()
+        }
+    };
     let materialized = materialize_run(
         prepared.settings.clone(),
         graph,
@@ -521,12 +527,12 @@ async fn build_preflight_report(
     )
     .await;
     let llm_ok = run_llm_check(
-        state,
         &mut checks,
         graph,
         &resolved_run,
         &configured_providers,
         catalog.as_ref(),
+        llm_result,
     )
     .await;
     run_github_token_check(&mut checks, prepared, &resolved_run, github_app).await;
@@ -923,12 +929,12 @@ struct PendingModelProbe {
 }
 
 async fn run_llm_check(
-    state: &AppState,
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
     settings: &RunNamespace,
     configured_providers: &[ProviderId],
     catalog: &Catalog,
+    llm_result: Result<LlmClientResult>,
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph, configured_providers, catalog);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
@@ -959,9 +965,10 @@ async fn run_llm_check(
         return true;
     }
 
-    match state.resolve_llm_client().await {
+    match llm_result {
         Ok(result) => {
             let auth_issues = result.auth_issues;
+            let registration_issues = result.registration_issues;
             let client = Arc::new(result.client);
 
             let mut all_ok = true;
@@ -980,6 +987,18 @@ async fn run_llm_check(
                         summary:     model_id.clone(),
                         details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
                         remediation: Some(auth_issue_message(&provider_id, issue)),
+                    }));
+                } else if let Some(issue) = registration_issues
+                    .iter()
+                    .find(|issue| issue.provider == provider_id)
+                {
+                    all_ok = false;
+                    completed_checks.push((index, CheckResult {
+                        name:        "LLM".into(),
+                        status:      CheckStatus::Warning,
+                        summary:     model_id.clone(),
+                        details:     vec![CheckDetail::new(format!("Provider: {provider_name}"))],
+                        remediation: Some(issue.error.to_string()),
                     }));
                 } else if !client.has_provider(provider_name) {
                     all_ok = false;
@@ -2107,13 +2126,14 @@ provider = "daytona"
                     }));
             })
             .await;
-        let base_url = server.url("/v1");
-        let state = crate::test_support::test_app_state_with_env_lookup(
-            crate::test_support::default_test_server_settings(),
-            RunLayer::default(),
-            5,
-            move |name| (name == "OPENAI_BASE_URL").then(|| base_url.clone()),
-        );
+        let state = crate::test_support::TestAppStateBuilder::new()
+            .runtime_settings(
+                crate::test_support::default_test_server_settings(),
+                RunLayer::default(),
+            )
+            .max_concurrent_runs(5)
+            .provider_base_url("openai", server.url("/v1"))
+            .build();
         state
             .vault
             .write()
@@ -2220,7 +2240,10 @@ digraph Demo {
 [providers.acme]
 display_name = "Acme"
 adapter = "openai_compatible"
+agent_profile = "openai"
 base_url = "https://api.acme.test/v1"
+
+[providers.acme.auth]
 credentials = ["env:ACME_API_KEY"]
 
 [models."acme-large"]

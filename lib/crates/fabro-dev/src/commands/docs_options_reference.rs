@@ -221,12 +221,13 @@ providers can be added when they use an adapter Fabro already supports.
 [llm.providers.proxy]
 display_name = "Acme Gateway"
 adapter = "openai_compatible"
-agent_profile = "openai"
 base_url = "https://llm-gateway.example.com/v1"
-credentials = ["env:ACME_GATEWAY_API_KEY"]
 priority = 50
 enabled = true
 aliases = ["gateway"]
+
+[llm.providers.proxy.auth]
+credentials = ["env:ACME_GATEWAY_API_KEY"]
 
 [llm.providers.proxy.extra_headers]
 x-portkey-api-key = { env = "PORTKEY_API_KEY" }
@@ -237,10 +238,13 @@ x-team-secret = { credential = "gateway_team_secret" }
 | Key | Type / values | Default | Description |
 |---|---|---|---|
 | `display_name` | string | provider ID | Human-readable provider name. |
-| `adapter` | string | inferred for built-ins | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Custom providers normally use `"openai_compatible"`. |
-| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | adapter default | Agent profile used for project memory, CLI/ACP command selection, and native session routing. |
-| `base_url` | string | adapter default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
-| `credentials` | array<string> | built-in env refs | Ordered credential refs. Accepted string forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `adapter` | string | built-in value | Adapter registry key, such as `"anthropic"`, `"openai"`, `"gemini"`, or `"openai_compatible"`. Required for new providers. |
+| `agent_profile` | `"anthropic"` \| `"openai"` \| `"gemini"` | derived from `adapter` | Agent profile used for project memory, CLI/ACP command selection, and native session routing. Override only when a provider needs profile behavior different from its adapter. |
+| `billing_policy` | `"openai"` \| `"anthropic"` \| `"gemini"` \| `"none"` | derived from `adapter` | Provider-owned billing algorithm for usage estimates. Override for exceptional providers such as local no-billing runtimes. |
+| `base_url` | string | built-in value or adapter runtime default | Provider API base URL. Required for most custom OpenAI-compatible providers. |
+| `auth` | table | omitted | API-key auth config. Omit the table entirely for providers that need no API key; any `extra_headers` are still attached. |
+| `auth.credentials` | array<string> | required when `auth` present | Ordered credential refs. Accepted forms are `credential:<id>` and `env:<NAME>`. Literal secret strings are rejected. |
+| `auth.header` | `"bearer"` or `{ custom = "Header-Name" }` | `"bearer"` | Primary API-key header policy. Omit when the provider uses a standard bearer token. |
 | `extra_headers` | table | `{}` | Additional headers attached to provider requests. Values must be typed refs: `{ literal = "..." }`, `{ env = "NAME" }`, or `{ credential = "id" }`. |
 | `priority` | integer | `0` | Higher-priority configured providers win default selection; ties use canonical provider ID. |
 | `enabled` | boolean | `true` | Set `false` to disable a provider after lower-precedence layers define it. |
@@ -260,6 +264,7 @@ agent_profile = "anthropic"
 display_name = "Team Code Large"
 family = "team-code"
 default = true
+probe = true
 enabled = true
 aliases = ["team-code"]
 estimated_output_tps = 80
@@ -300,6 +305,7 @@ cache_input_cost_per_mtok = 0.60
 | `training` | string | None | Training data cutoff label. |
 | `knowledge_cutoff` | string or TOML date | None | Public knowledge cutoff label; TOML dates normalize to `YYYY-MM-DD`. |
 | `default` | boolean | `false` | Whether this is the provider default model. |
+| `probe` | boolean | `false` | Whether this model should be preferred for provider connectivity probes. Set `false` in a higher-precedence layer to clear an inherited probe marker. |
 | `enabled` | boolean | `true` | Set `false` to disable a model after lower-precedence layers define it. |
 | `aliases` | array<string> | `[]` | Additional model names accepted by routing and fallback config. |
 | `estimated_output_tps` | number | None | Estimated output tokens per second for catalog display and planning. |
@@ -318,14 +324,14 @@ cache_input_cost_per_mtok = 0.60
 | `tools` | boolean | `false` | Whether the model supports tool calls. |
 | `vision` | boolean | `false` | Whether the model accepts image inputs. |
 | `reasoning` | boolean | `false` | Whether the model has reasoning behavior. |
-| `reasoning_effort` | `"levels"` \| `"none"` | `"none"` | How Fabro may expose reasoning effort for this model. |
+| `reasoning_effort` | `"levels"` \| `"none"` | `"none"` | Whether the model endpoint supports a native reasoning-effort parameter. |
 | `prompt_cache` | boolean | `false` | Whether prompt cache pricing/usage applies. |
 
 ## `[llm.models.<id>.controls]`
 
 | Key | Type / values | Default | Description |
 |---|---|---|---|
-| `reasoning_effort` | array<string> | adapter defaults | User-facing reasoning effort values Fabro may send for this model. |
+| `reasoning_effort` | array<string> | all standard levels when feature is `"levels"` | User-facing reasoning effort values Fabro may send for this model. Can be set explicitly for reasoning models whose provider adapter maps effort to a non-native API shape. |
 | `speed` | array<string> | `[]` | Additional speeds beyond implicit `standard`; do not list `standard`. |
 
 ## `[llm.models.<id>.costs]`
