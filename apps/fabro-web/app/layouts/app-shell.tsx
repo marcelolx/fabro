@@ -10,9 +10,9 @@ import {
 import {
   Bars3Icon,
   BeakerIcon,
+  ClockIcon,
   Cog6ToothIcon,
   PlayIcon,
-  SparklesIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
@@ -24,7 +24,7 @@ import { useToggleDemoMode } from "../lib/mutations";
 import { useAuthMe } from "../lib/queries";
 
 const allNavigation = [
-  { name: "Automations", href: "/automations", icon: SparklesIcon, demoOnly: true },
+  { name: "Automations", href: "/automations", icon: ClockIcon, demoOnly: true },
   { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
   { name: "Settings", href: "/settings", icon: Cog6ToothIcon, demoOnly: false },
 ];
