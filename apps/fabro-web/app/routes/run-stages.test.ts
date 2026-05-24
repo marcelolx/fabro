@@ -8,7 +8,6 @@ import {
   formatStageModelUsageLabel,
   groupConsecutiveTools,
   selectStageRenderer,
-  stageModelUsageTitle,
 } from "./run-stages";
 
 function envelope(seq: number, partial: Partial<EventEnvelope>): EventEnvelope {
@@ -391,18 +390,7 @@ describe("eventsToActivity", () => {
         reasoning_effort: "high",
         speed: "fast",
       }),
-    ).toBe("gpt-5.5 · high");
-  });
-
-  test("stageModelUsageTitle includes provider and speed details", () => {
-    expect(
-      stageModelUsageTitle({
-        mode: "prompt",
-        provider: "anthropic",
-        model: "claude-sonnet-4-6",
-        speed: "standard",
-      }),
-    ).toBe("Provider: anthropic\nModel: claude-sonnet-4-6\nSpeed: standard");
+    ).toBe("gpt-5.5[high]");
   });
 
   test("formatStageModelUsageLabel returns null when the projection has no model", () => {

@@ -29,7 +29,13 @@ import { StageInsightsSidebar } from "../components/stage-insights-sidebar";
 import { StageSidebar } from "../components/stage-sidebar";
 import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
-import { Tooltip } from "../components/ui";
+import {
+  HoverCard,
+  PopoverHeader,
+  PopoverRow,
+  PopoverRows,
+  Tooltip,
+} from "../components/ui";
 import { ConditionalDecision } from "../components/stage-renderers/conditional-decision";
 import { FanInResults } from "../components/stage-renderers/fan-in-results";
 import {
@@ -548,21 +554,31 @@ export function formatStageModelUsageLabel(
   const model = providerUsed?.model;
   if (!model) return null;
   const effort = providerUsed.reasoning_effort;
-  return effort ? `${model} · ${effort}` : model;
+  return effort ? `${model}[${effort}]` : model;
 }
 
-export function stageModelUsageTitle(
-  providerUsed: StageModelUsage | null | undefined,
-): string {
-  if (!providerUsed) return "LLM model used for this stage";
-  const parts: string[] = [];
-  if (providerUsed.provider) parts.push(`Provider: ${providerUsed.provider}`);
-  if (providerUsed.model) parts.push(`Model: ${providerUsed.model}`);
-  if (providerUsed.reasoning_effort) {
-    parts.push(`Reasoning effort: ${providerUsed.reasoning_effort}`);
-  }
-  if (providerUsed.speed) parts.push(`Speed: ${providerUsed.speed}`);
-  return parts.length ? parts.join("\n") : "LLM model used for this stage";
+function ModelUsagePopover({ providerUsed }: { providerUsed: StageModelUsage }) {
+  return (
+    <>
+      <PopoverHeader>Model</PopoverHeader>
+      <PopoverRows>
+        {providerUsed.provider && (
+          <PopoverRow label="Provider">{providerUsed.provider}</PopoverRow>
+        )}
+        {providerUsed.model && (
+          <PopoverRow label="Model">
+            <span className="break-all font-mono">{providerUsed.model}</span>
+          </PopoverRow>
+        )}
+        {providerUsed.reasoning_effort && (
+          <PopoverRow label="Reasoning">{providerUsed.reasoning_effort}</PopoverRow>
+        )}
+        {providerUsed.speed && (
+          <PopoverRow label="Speed">{providerUsed.speed}</PopoverRow>
+        )}
+      </PopoverRows>
+    </>
+  );
 }
 
 function turnLabel(turn: TurnType): string {
@@ -1271,10 +1287,10 @@ function EventsToolbar({
     onSearchChange("");
   }
 
-  const modelUsage = useMemo(() => {
-    const label = formatStageModelUsageLabel(providerUsed);
-    return label ? { label, title: stageModelUsageTitle(providerUsed) } : null;
-  }, [providerUsed]);
+  const modelUsageLabel = useMemo(
+    () => formatStageModelUsageLabel(providerUsed),
+    [providerUsed],
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
@@ -1321,16 +1337,16 @@ function EventsToolbar({
             : `${totalCount.toLocaleString()} events`}
         </span>
       )}
-      {modelUsage && (
-        <span
+      {modelUsageLabel && providerUsed && (
+        <HoverCard
           className={`inline-flex items-center gap-1.5 text-xs text-fg-muted ${
             showFilters ? "" : "ml-auto"
           }`}
-          title={modelUsage.title}
+          content={<ModelUsagePopover providerUsed={providerUsed} />}
         >
           <CpuChipIcon className="size-3.5" aria-hidden="true" />
-          <span className="font-mono">{modelUsage.label}</span>
-        </span>
+          <span className="font-mono">{modelUsageLabel}</span>
+        </HoverCard>
       )}
       {tab === "primary" && renderer === "command" && commandTurn && (
         <CommandStatus turn={commandTurn} />
