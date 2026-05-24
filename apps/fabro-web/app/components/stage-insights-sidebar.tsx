@@ -10,12 +10,9 @@ import {
   XCircleIcon,
 } from "@heroicons/react/24/solid";
 import {
-  BoltIcon,
   CheckBadgeIcon,
   CommandLineIcon,
   ListBulletIcon,
-  LockClosedIcon,
-  PencilSquareIcon,
   PuzzlePieceIcon,
   ServerStackIcon,
   Squares2X2Icon,
@@ -23,7 +20,6 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   AgentSkillActivationSource,
-  PermissionLevel,
   StageContextWindowCategory,
   StageContextWindowStaleness,
   TodoStatus,
@@ -75,7 +71,6 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
   const skills = stage?.skills ?? { activated: [], available: [] };
   const agentTools = stage?.agent_tools ?? [];
   const mcpServers = stage?.mcp_servers ?? [];
-  const permission = stage?.permission_level ?? null;
 
   const todoStats = countTodoStats(todos);
   const activatedSkillNames = new Set(skills.activated.map((s) => s.name));
@@ -125,18 +120,6 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
         <ContextWindowSection collapsed={collapsed} snapshot={contextWindow ?? null} />
 
         <CollapsibleSection
-          sectionKey="tools"
-          title="Tools"
-          icon={WrenchScrewdriverIcon}
-          collapsed={collapsed}
-          count={`${invokedToolCount}/${agentTools.length}`}
-          empty={agentTools.length === 0}
-          hideCountWhenCollapsed
-        >
-          <AgentToolsSection tools={agentTools} />
-        </CollapsibleSection>
-
-        <CollapsibleSection
           sectionKey="skills"
           title="Skills"
           icon={CheckBadgeIcon}
@@ -160,7 +143,17 @@ export function StageInsightsSidebar({ stage, contextWindow }: StageInsightsSide
           <McpSection servers={mcpServers} />
         </CollapsibleSection>
 
-        <PermissionBadge level={permission} collapsed={collapsed} />
+        <CollapsibleSection
+          sectionKey="tools"
+          title="Tools"
+          icon={WrenchScrewdriverIcon}
+          collapsed={collapsed}
+          count={`${invokedToolCount}/${agentTools.length}`}
+          empty={agentTools.length === 0}
+          hideCountWhenCollapsed
+        >
+          <AgentToolsSection tools={agentTools} />
+        </CollapsibleSection>
       </div>
     </aside>
   );
@@ -523,50 +516,24 @@ function SkillSourceIcon({ source }: { source: ActivatedSkill["source"] }) {
 function AgentToolsSection({ tools }: { tools: AgentToolSummary[] }) {
   if (tools.length === 0) return <p className="text-xs text-fg-muted">No tools reported.</p>;
   return (
-    <ul role="list" className="space-y-2">
+    <ul role="list" className="space-y-1">
       {tools.map((tool) => {
         const nameClass = tool.invoked
           ? "min-w-0 flex-1 truncate text-xs text-fg-2"
           : "min-w-0 flex-1 truncate text-xs text-fg-muted";
         return (
-          <li key={tool.name} className="space-y-0.5">
-            <div className="flex items-center gap-1.5">
-              {tool.invoked ? (
-                <CheckCircleIcon className="size-3.5 shrink-0 text-mint" aria-label="Invoked" />
-              ) : (
-                <EmptyCircleIcon className="size-3.5 shrink-0 text-fg-muted" />
-              )}
-              <span className={nameClass}>{tool.name}</span>
-              <span className="font-mono text-[10px] tabular-nums text-fg-muted">
-                {tool.invoked ? "used" : "available"}
-              </span>
-            </div>
-            <p className="text-[11px] leading-snug text-fg-muted">{tool.description}</p>
-            <div className="flex flex-wrap gap-1">
-              <span className="rounded bg-overlay px-1 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
-                {toolSourceLabel(tool.source)}
-              </span>
-              <span className="rounded bg-overlay px-1 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
-                {tool.category}
-              </span>
-            </div>
+          <li key={tool.name} className="flex items-center gap-1.5">
+            {tool.invoked ? (
+              <CheckCircleIcon className="size-3.5 shrink-0 text-mint" aria-label="Used" />
+            ) : (
+              <EmptyCircleIcon className="size-3.5 shrink-0 text-fg-muted" aria-label="Not used" />
+            )}
+            <span className={nameClass}>{tool.name}</span>
           </li>
         );
       })}
     </ul>
   );
-}
-
-function toolSourceLabel(source: AgentToolSummary["source"]): string {
-  switch (source.kind) {
-    case "mcp":
-      return `mcp:${source.server_name}`;
-    case "skill":
-      return "skill";
-    case "native":
-    default:
-      return "native";
-  }
 }
 
 // ---------- MCPs ----------
@@ -603,53 +570,6 @@ function McpSection({ servers }: { servers: McpServerProjection[] }) {
       })}
     </ul>
   );
-}
-
-// ---------- Permissions ----------
-
-function PermissionBadge({ level, collapsed }: { level: PermissionLevel | null; collapsed: boolean }) {
-  const { Icon, label, color, title } = permissionVisual(level);
-  if (collapsed) {
-    // Collapsed footer is a static affordance, not a danger signal —
-    // always use the neutral lock so a "Full access" stage doesn't
-    // splash red in the corner of the page.
-    return (
-      <div className="flex flex-col items-center gap-0.5" title={title}>
-        <LockClosedIcon className="size-4 shrink-0 text-fg-muted" aria-label={label} />
-      </div>
-    );
-  }
-  return (
-    <div
-      title={title}
-      className="mx-2 flex items-center gap-2 rounded-md border border-line bg-overlay px-2 py-1.5"
-    >
-      <Icon className={`size-4 shrink-0 ${color}`} />
-      <span className="text-xs text-fg-2">{label}</span>
-    </div>
-  );
-}
-
-function permissionVisual(level: PermissionLevel | null): {
-  Icon: IconType;
-  color: string;
-  label: string;
-  title: string;
-} {
-  switch (level) {
-    // Permission badges are informational, not warning signals. The icon
-    // shape (lock / pencil / bolt) carries the level distinction; colors
-    // stay in the neutral foreground palette so no level looks alarming.
-    case PermissionLevel.READ_ONLY:
-      return { Icon: LockClosedIcon, color: "text-fg-3", label: "Read-only", title: "Agent can read but not modify files or run commands" };
-    case PermissionLevel.READ_WRITE:
-      return { Icon: PencilSquareIcon, color: "text-fg-2", label: "Read/write", title: "Agent can read and modify files" };
-    case PermissionLevel.FULL:
-      return { Icon: BoltIcon, color: "text-fg-2", label: "Full access", title: "Agent can read, modify files, and run commands" };
-    case null:
-    default:
-      return { Icon: LockClosedIcon, color: "text-fg-muted", label: "Unknown", title: "Permission level not yet reported" };
-  }
 }
 
 // ---------- helpers ----------
