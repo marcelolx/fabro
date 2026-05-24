@@ -9607,6 +9607,8 @@ async fn resume_cancelled_run_with_checkpoint_transitions_to_runnable() {
         .unwrap();
     let body = response_json!(response, StatusCode::OK).await;
     assert_eq!(run_json_status(&body)["kind"], "runnable");
+    assert_eq!(body["timestamps"]["completed_at"], serde_json::Value::Null);
+    assert_eq!(body["timing"], serde_json::Value::Null);
 
     let state = state
         .store
@@ -9617,6 +9619,7 @@ async fn resume_cancelled_run_with_checkpoint_transitions_to_runnable() {
         .await
         .unwrap();
     assert_eq!(state.status, RunStatus::Runnable);
+    assert!(state.conclusion.is_none());
 }
 
 #[tokio::test]

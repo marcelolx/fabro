@@ -75,6 +75,7 @@ impl RunProjectionReducer for RunProjection {
             EventBody::RunStartRequested(props) => {
                 if props.resume {
                     self.try_apply_status(RunStatus::Submitted, ts)?;
+                    self.conclusion = None;
                 }
             }
             EventBody::RunPending(props) => {
@@ -3018,6 +3019,72 @@ mod tests {
         let conclusion = state.conclusion.unwrap();
         assert_eq!(conclusion.failure, Some(failure));
         assert_eq!(conclusion.final_git_commit_sha.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn resume_start_request_clears_prior_terminal_conclusion() {
+        let mut state = running_projection();
+        let failed_at = "2026-05-24T22:01:19Z";
+
+        state
+            .apply_event(&test_raw_event_at(
+                4,
+                failed_at,
+                "run.failed",
+                &serde_json::to_value(run_failed_props(FailureReason::Cancelled)).unwrap(),
+                None,
+            ))
+            .unwrap();
+        assert!(state.conclusion.is_some());
+        assert_eq!(
+            build_summary(&state, &fixtures::RUN_1)
+                .timestamps
+                .completed_at,
+            Some(test_dt(failed_at))
+        );
+
+        state
+            .apply_event(&test_raw_event_at(
+                5,
+                "2026-05-24T22:36:50Z",
+                "run.start_requested",
+                &json!({ "resume": true }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                6,
+                "2026-05-24T22:36:51Z",
+                "run.runnable",
+                &json!({ "source": "start_requested" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                7,
+                "2026-05-24T22:36:52Z",
+                "run.starting",
+                &json!({}),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                8,
+                "2026-05-24T22:36:53Z",
+                "run.running",
+                &json!({}),
+                None,
+            ))
+            .unwrap();
+
+        let summary = build_summary(&state, &fixtures::RUN_1);
+        assert_eq!(state.status, RunStatus::Running);
+        assert!(state.conclusion.is_none());
+        assert_eq!(summary.timestamps.completed_at, None);
+        assert_eq!(summary.timing, None);
     }
 
     #[test]
