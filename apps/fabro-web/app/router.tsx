@@ -34,6 +34,7 @@ import * as Insights from "./routes/insights";
 import * as InsightsEditor from "./routes/insights-editor";
 import * as InsightsNew from "./routes/insights-new";
 import * as Settings from "./routes/settings";
+import * as SettingsIndex from "./routes/settings-index";
 import * as SettingsGeneral from "./routes/settings-general";
 import * as SettingsIntegrations from "./routes/settings-integrations";
 import * as SettingsModels from "./routes/settings-models";
@@ -142,7 +143,7 @@ export const routes: RouteObject[] = [
           }),
           route("settings", Settings, {
             children: [
-              indexRoute(SettingsModels),
+              indexRoute(SettingsIndex),
               route("models", SettingsModels),
               route("integrations", SettingsIntegrations),
               route("sandboxes", SettingsSandboxes),

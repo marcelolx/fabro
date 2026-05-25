@@ -9,6 +9,7 @@ import {
   PuzzlePieceIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
+import { Fragment } from "react";
 import { Link, Outlet, useLocation, useMatches } from "react-router";
 
 export function meta({}: any) {
@@ -17,83 +18,104 @@ export function meta({}: any) {
 
 export const handle = { hideHeader: true };
 
-type NavItem = {
-  type?: "link";
+export type NavItem = {
   name: string;
   href: string;
   icon: typeof Cog6ToothIcon;
+  description: string;
   match: (pathname: string) => boolean;
 };
 
-type NavSection = { type: "section"; key: string; label: string };
+export type NavSection = {
+  key: string;
+  label?: string;
+  items: NavItem[];
+};
 
-type NavDivider = { type: "divider"; key: string };
-
-type NavEntry = NavItem | NavSection | NavDivider;
-
-const navItems: NavEntry[] = [
-  { type: "section", key: "general", label: "General" },
+export const navSections: NavSection[] = [
   {
-    name: "Models",
-    href: "/settings/models",
-    icon: CpuChipIcon,
-    match: (p) => p === "/settings" || p.startsWith("/settings/models"),
+    key: "general",
+    label: "General",
+    items: [
+      {
+        name: "Models",
+        href: "/settings/models",
+        icon: CpuChipIcon,
+        description: "LLM providers and credentials.",
+        match: (p) => p.startsWith("/settings/models"),
+      },
+      {
+        name: "Integrations",
+        href: "/settings/integrations",
+        icon: PuzzlePieceIcon,
+        description: "Slack, GitHub, and other services.",
+        match: (p) => p.startsWith("/settings/integrations"),
+      },
+      {
+        name: "Sandboxes",
+        href: "/settings/sandboxes",
+        icon: CubeTransparentIcon,
+        description: "Where workflow stages execute.",
+        match: (p) => p.startsWith("/settings/sandboxes"),
+      },
+      {
+        name: "Security",
+        href: "/settings/security",
+        icon: ShieldCheckIcon,
+        description: "Authentication and network allowlist.",
+        match: (p) => p.startsWith("/settings/security"),
+      },
+      {
+        name: "Secrets",
+        href: "/settings/secrets",
+        icon: KeyIcon,
+        description: "Write-only values for workflow runs.",
+        match: (p) => p.startsWith("/settings/secrets"),
+      },
+    ],
   },
   {
-    name: "Integrations",
-    href: "/settings/integrations",
-    icon: PuzzlePieceIcon,
-    match: (p) => p.startsWith("/settings/integrations"),
+    key: "administration",
+    label: "Administration",
+    items: [
+      {
+        name: "Server",
+        href: "/settings/server",
+        icon: Cog6ToothIcon,
+        description: "URLs, listen address, scheduler.",
+        match: (p) => p.startsWith("/settings/server"),
+      },
+      {
+        name: "Storage",
+        href: "/settings/storage",
+        icon: CircleStackIcon,
+        description: "Database, runs, and artifacts.",
+        match: (p) => p.startsWith("/settings/storage"),
+      },
+      {
+        name: "Monitoring",
+        href: "/settings/monitoring",
+        icon: ChartBarSquareIcon,
+        description: "CPU, memory, disk, concurrency.",
+        match: (p) => p.startsWith("/settings/monitoring"),
+      },
+    ],
   },
   {
-    name: "Sandboxes",
-    href: "/settings/sandboxes",
-    icon: CubeTransparentIcon,
-    match: (p) => p.startsWith("/settings/sandboxes"),
-  },
-  {
-    name: "Security",
-    href: "/settings/security",
-    icon: ShieldCheckIcon,
-    match: (p) => p.startsWith("/settings/security"),
-  },
-  {
-    name: "Secrets",
-    href: "/settings/secrets",
-    icon: KeyIcon,
-    match: (p) => p.startsWith("/settings/secrets"),
-  },
-  { type: "section", key: "administration", label: "Administration" },
-  {
-    name: "Server",
-    href: "/settings/server",
-    icon: Cog6ToothIcon,
-    match: (p) => p.startsWith("/settings/server"),
-  },
-  {
-    name: "Storage",
-    href: "/settings/storage",
-    icon: CircleStackIcon,
-    match: (p) => p.startsWith("/settings/storage"),
-  },
-  {
-    name: "Monitoring",
-    href: "/settings/monitoring",
-    icon: ChartBarSquareIcon,
-    match: (p) => p.startsWith("/settings/monitoring"),
-  },
-  { type: "divider", key: "after-administration" },
-  {
-    name: "Live Events",
-    href: "/settings/live-events",
-    icon: BoltIcon,
-    match: (p) => p.startsWith("/settings/live-events"),
+    key: "diagnostics",
+    items: [
+      {
+        name: "Live Events",
+        href: "/settings/live-events",
+        icon: BoltIcon,
+        description: "Real-time event stream.",
+        match: (p) => p.startsWith("/settings/live-events"),
+      },
+    ],
   },
 ];
 
-function isLink(entry: NavEntry): entry is NavItem {
-  return entry.type !== "divider" && entry.type !== "section";
-}
+const allItems = navSections.flatMap((s) => s.items);
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -103,7 +125,7 @@ export default function SettingsLayout() {
   const { pathname } = useLocation();
   const matches = useMatches();
   const currentName =
-    navItems.filter(isLink).find((item) => item.match(pathname))?.name ?? "Settings";
+    allItems.find((item) => item.match(pathname))?.name ?? "Settings";
   const fullHeight = matches.some(
     (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
   );
@@ -118,46 +140,46 @@ export default function SettingsLayout() {
       <aside className="lg:w-56 lg:shrink-0">
         <nav className="sticky top-6">
           <ul role="list" className="flex gap-1 overflow-x-auto lg:flex-col lg:gap-0.5">
-            {navItems.map((entry) => {
-              if (entry.type === "divider") {
-                return (
+            {navSections.map((section, sectionIdx) => (
+              <Fragment key={section.key}>
+                {section.label ? (
                   <li
-                    key={entry.key}
+                    className={classNames(
+                      "hidden lg:block lg:px-2.5 lg:pb-1 lg:text-xs lg:font-medium lg:uppercase lg:tracking-wider lg:text-fg-muted",
+                      sectionIdx === 0 ? "lg:pt-0" : "lg:pt-4",
+                    )}
+                  >
+                    {section.label}
+                  </li>
+                ) : sectionIdx > 0 ? (
+                  <li
                     role="separator"
                     aria-orientation="vertical"
                     className="mx-1 self-stretch border-l border-line lg:mx-0 lg:my-2 lg:self-auto lg:border-l-0 lg:border-t"
                   />
-                );
-              }
-              if (entry.type === "section") {
-                return (
-                  <li
-                    key={entry.key}
-                    className="hidden lg:block lg:px-2.5 lg:pt-4 lg:pb-1 lg:text-xs lg:font-medium lg:uppercase lg:tracking-wider lg:text-fg-muted first:lg:pt-0"
-                  >
-                    {entry.label}
-                  </li>
-                );
-              }
-              const current = entry.match(pathname);
-              return (
-                <li key={entry.name}>
-                  <Link
-                    to={entry.href}
-                    aria-current={current ? "page" : undefined}
-                    className={classNames(
-                      "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm whitespace-nowrap transition-colors",
-                      current
-                        ? "bg-overlay text-fg"
-                        : "text-fg-3 hover:bg-overlay hover:text-fg",
-                    )}
-                  >
-                    <entry.icon className="size-4 shrink-0" aria-hidden="true" />
-                    {entry.name}
-                  </Link>
-                </li>
-              );
-            })}
+                ) : null}
+                {section.items.map((item) => {
+                  const current = item.match(pathname);
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        to={item.href}
+                        aria-current={current ? "page" : undefined}
+                        className={classNames(
+                          "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm whitespace-nowrap transition-colors",
+                          current
+                            ? "bg-overlay text-fg"
+                            : "text-fg-3 hover:bg-overlay hover:text-fg",
+                        )}
+                      >
+                        <item.icon className="size-4 shrink-0" aria-hidden="true" />
+                        {item.name}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </Fragment>
+            ))}
           </ul>
         </nav>
       </aside>
