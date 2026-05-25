@@ -190,7 +190,7 @@ export function RunsListView({
           />
         </div>
       )}
-      {(total == null || total >= 25) && (
+      {(hasMore || (pageCount != null && pageCount > 1) || page > 1) && (
         <ListPager
           page={page}
           pageSize={pageSize}
