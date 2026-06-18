@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::io::ErrorKind;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -40,7 +39,6 @@ use super::super::{
     parse_stage_id_path, reject_if_archived, submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
-use crate::interp::resolve_interp;
 use crate::principal_middleware::{
     RequireCommandLog, RequireRunManagementTarget, RequireRunScoped, RequireRunStageScoped,
     RequiredRunManagementActor, RequiredUser,
@@ -698,16 +696,7 @@ pub(crate) async fn create_run_from_manifest(
     create_input.submitted_manifest_bytes = Some(submitted_manifest_bytes);
     create_input.automation = automation;
 
-    let storage_root = match resolve_interp(&state.server_settings().server.storage.root) {
-        Ok(path) => PathBuf::from(path),
-        Err(err) => {
-            return ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to resolve server storage root: {err}"),
-            )
-            .into_response();
-        }
-    };
+    let storage_root = state.server_storage_dir();
     let created = match Box::pin(operations::create(
         state.store.as_ref(),
         create_input,
