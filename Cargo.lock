@@ -2701,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-mcp-store"
-version = "0.267.0-nightly.0"
+version = "0.275.0-nightly.0"
 dependencies = [
  "fabro-types",
  "serde",
