@@ -13,11 +13,15 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { PreparedStep } from './prepared-step';
 
-export interface RunPrepareSettings {
-    'steps': Array<PreparedStep>;
-    'timeout_ms': number;
+export interface PreparedScriptStep {
+    'type': PreparedScriptStepTypeEnum;
+    'script': string;
+    'env'?: { [key: string]: string; };
 }
+
+export const PreparedScriptStepTypeEnum = {
+    SCRIPT: 'script'
+} as const;
+
+export type PreparedScriptStepTypeEnum = typeof PreparedScriptStepTypeEnum[keyof typeof PreparedScriptStepTypeEnum];
